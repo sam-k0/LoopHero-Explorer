@@ -12,35 +12,22 @@
 #include <map>
 #include <iostream>
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_dx11.h"
+#include "imgui/imgui_impl_win32.h"
 
 #define _CRT_SECURE_NO_WARNINGS
 
 
 std::vector<YYRValue> SwapCards;
-int swapCooldown = 60;
 CallbackAttributes_t* frameCallbackAttr;
+// imgui
+bool g_ImGuiInitialized = false;
+ID3D11Device* g_Device = nullptr;
+ID3D11DeviceContext* g_Context = nullptr;
+HWND g_hWnd = nullptr;
+ID3D11RenderTargetView* g_RTV = nullptr;
 
-int lastSurf = -1;
-
-bool active = false;
-
-void addExternalSprite()
-{
-    //s_hero_attack_rytsar
-    //double idx = Assets::AddSprite("arba_spritesheet.png", 11, true, true, 64,54);
-    //Misc::Print(std::to_string(idx));
-
-    //Misc::Print(std::to_string(Assets::GetSpriteImgnum(LHSpriteEnum::s_hero_attack_rytsar)));
-    //Misc::Print(std::to_string(Assets::GetSpriteOffsetX(LHSpriteEnum::s_hero_attack_rytsar)));
-    //Misc::Print(std::to_string(Assets::GetSpriteOffsetY(LHSpriteEnum::s_hero_attack_rytsar)));
-
-    // Replace s_hero_attack_rytsar
-    Assets::SpriteReplace(LHSpriteEnum::s_hero_attack_rytsar, "Assets\\arba_attack.png", 4, true, false, 0.0, 0.0);
-    Assets::SpriteReplace(LHSpriteEnum::s_hero_idle_rytsar, "Assets\\arba_idle.png", 1, true, false, 0.0, 0.0);
-    Assets::SpriteReplace(LHSpriteEnum::s_hero_charge_rytsar, "Assets\\arba_idle.png", 1, true, false, 0.0, 0.0);
-    Assets::SpriteReplace(LHSpriteEnum::s_hero_hurt_rytsar, "Assets\\arba_hurt.png", 1, true, false, 0.0, 0.0);
-    Assets::SpriteReplace(LHSpriteEnum::s_hero_warrior, "Assets\\arba_map.png", 4, true, false, 0.0, 0.0);
-}
 
 void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
 {
@@ -212,10 +199,73 @@ YYTKStatus PluginUnload()
 
 YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 {
-    if (swapCooldown > 0)
+   
+    /*if (pEvent->GetEventType() == EVT_ENDSCENE)
     {
-        swapCooldown -= 1;
-    }    
+        YYTKEndSceneEvent* pEndSceneEvent = (YYTKEndSceneEvent*)pEvent;
+        auto& args = pEndSceneEvent->Arguments();
+
+        // Get the D3D9 device (first argument in the tuple)
+        IDirect3DDevice9* pD3D9 = std::get<0>(args);
+
+        // Now you can use pD3D9!
+    }
+    else*/ if (pEvent->GetEventType() == EVT_PRESENT)
+    {
+        
+        YYTKPresentEvent* pPresentEvent = (YYTKPresentEvent*)pEvent;
+        auto& args = pPresentEvent->Arguments();
+
+        // Get the arguments (SwapChain, Sync, Flags)
+        IDXGISwapChain* pSwapChain = std::get<0>(args);
+        UINT Sync = std::get<1>(args);
+        UINT Flags = std::get<2>(args);
+
+
+        if (!g_ImGuiInitialized)
+        {
+            if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&g_Device)))
+            {
+                g_Device->GetImmediateContext(&g_Context);
+
+                DXGI_SWAP_CHAIN_DESC desc;
+                pSwapChain->GetDesc(&desc);
+                g_hWnd = desc.OutputWindow;
+
+                ImGui::CreateContext();
+                ImGui_ImplWin32_Init(g_hWnd);
+                ImGui_ImplDX11_Init(g_Device, g_Context);
+
+                ID3D11Texture2D* pBackBuffer = nullptr;
+                pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
+
+                if (pBackBuffer)
+                {
+                    g_Device->CreateRenderTargetView(pBackBuffer, NULL, &g_RTV);
+                    pBackBuffer->Release();
+                }
+
+                g_ImGuiInitialized = true;
+                Misc::Print("Initialized imgui!");
+            }
+        }
+        if (g_ImGuiInitialized)
+        {
+            ImGui_ImplDX11_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+
+            // Your UI
+            ImGui::Begin("Loop Hero Mod");
+            ImGui::Text("ImGui injected successfully!");
+            ImGui::End();
+
+            ImGui::Render();
+            g_Context->OMSetRenderTargets(1, &g_RTV, NULL);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
+    }
+
     return YYTK_OK;
 }
 
@@ -238,115 +288,13 @@ YYTKStatus ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
         SwapCards.clear();
     }
 
-    if (Misc::StringHasSubstr(codeObj->i_pName, "statistik_Draw_0"))
-    {
-        //PrintMessage(CLR_DEFAULT, "%s SpriteID: %d", codeObj->i_pName, selfInst->i_spriteindex);
-        // Check if surf exists, free it, create new, assign
-        YYRValue statsPanel = Misc::CallBuiltinA("instance_nearest", {32.0,32.0,double(LHObjectEnum::o_camp_statistik)});
-        YYRValue origsurf = Misc::CallBuiltinA("variable_instance_get", {statsPanel, "statsurf"});
-        Misc::CallBuiltinA("variable_instance_set", { statsPanel, "text","Playing modded" });
-        if ((int)origsurf != lastSurf)
-        {
-            YYRValue exists = Misc::CallBuiltinA("surface_exists", { origsurf });
-            if ((bool)exists == true) //Draw
-            {
-                //Misc::Print("surf exists");
-                if ((bool)Misc::CallBuiltinA("surface_set_target", { origsurf }) == true)
-                {
-                    // save orig draw vars
-                    YYRValue halign = Misc::CallBuiltinA("draw_get_halign", {  });
-                    YYRValue font = Misc::CallBuiltinA("draw_get_font", {});
-                    // get surf vars
-                    YYRValue surfw = Misc::CallBuiltinA("surface_get_width", { origsurf });
-                    YYRValue surfh = Misc::CallBuiltinA("surface_get_height", { origsurf });
-
-                    // draw
-                    Misc::CallBuiltinA("draw_set_font", { 1.0 });
-
-                    YYRValue col = Misc::CallBuiltinA("make_color_rgb", {96.,34.,23.});
-                    Misc::CallBuiltinA("draw_set_color", { col });
-                    Misc::CallBuiltinA("draw_rectangle", { 0.0,0.0,surfw, surfh, 0.0 });
-                    
-                    col = Misc::CallBuiltinA("make_color_rgb", { 255.,255.,255. });
-                    Misc::CallBuiltinA("draw_set_color", { 16777215.0 });
-                    Misc::CallBuiltinA("draw_set_halign", { 0.0 });
-                    Misc::CallBuiltinA("draw_text_transformed", {32.,32.,"Hello from mods!",1.0,1.0,0.0 });
-                    // reset
-                    Misc::CallBuiltinA("surface_reset_target", { });
-                    Misc::CallBuiltinA("draw_set_halign", {halign});
-                    Misc::CallBuiltinA("draw_set_font", { font });
-                }
-            }
-        }
-        lastSurf = (int)origsurf;
-        
-    }
-
+    /*
     if (Misc::StringHasSubstr(codeObj->i_pName, "o_menu_Draw_0"))
     {
-        for (int i = 0; i < SwapCards.size(); i++)
-        {
-            double dx = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { SwapCards[i], "xx"});
-            double dy = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { SwapCards[i], "yy" });
+      
+    }*/
 
-            YYRValue sprite = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { SwapCards[i], "sprite_index" });
-            double sw, sh;
-            Assets::GetSpriteDimensions((double)sprite, sw, sh);
-            Misc::CallBuiltin("draw_rectangle", nullptr, nullptr, {dx, dy, dx+sw,dy-sh, 1.0});
-
-        }
-    }
-
-    // Left mouse
-    if ( Misc::StringHasSubstr(codeObj->i_pName, "o_card") && Misc::StringHasSubstr(codeObj->i_pName, "gml_Object") && Misc::StringHasSubstr(codeObj->i_pName, "Mouse_56"))
-    {       
-        YYRValue mx = Misc::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
-        YYRValue my = Misc::CallBuiltin("device_mouse_y", nullptr, nullptr, { 0.0 });            
-        YYRValue cardid = Misc::CallBuiltin("instance_place", selfInst, otherInst, { double(mx)-16, my, (double)LHObjectEnum::o_card });
-           
-
-        if ((int)cardid == INSTANCE_NOONE || (swapCooldown > 0))
-        {
-            return YYTK_OK;            
-        }
-
-        Misc::Print("Picked up: " + std::to_string(int(cardid)));
-        Misc::Print("Len is : " + std::to_string(SwapCards.size()));
-        // Clear vector
-        SwapCards.clear();
-        SwapCards.push_back(cardid);
-    }
-    // Right mouse
-    if (Misc::StringHasSubstr(codeObj->i_pName, "o_card") && Misc::StringHasSubstr(codeObj->i_pName, "gml_Object") && Misc::StringHasSubstr(codeObj->i_pName, "Mouse_54"))
-    {
-        YYRValue mx = Misc::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
-        YYRValue my = Misc::CallBuiltin("device_mouse_y", nullptr, nullptr, { 0.0 });
-        YYRValue cardid = Misc::CallBuiltin("instance_place", selfInst, otherInst, { double(mx)-16, my, (double)LHObjectEnum::o_card });
-        if ((int)cardid == INSTANCE_NOONE || (swapCooldown > 0) || SwapCards.empty())
-        {
-            return YYTK_OK;
-        }
-
-        Misc::Print("Picked up: " + std::to_string(int(cardid)));
-        SwapCards.push_back(cardid);
-        Misc::Print("Len is : " + std::to_string(SwapCards.size()));
-        //swap
-        Misc::Print("swap: " + std::to_string(int(SwapCards[0])) + "/" + std::to_string(int(SwapCards[1])));
-
-        // check if they still exist
-        if (double(Misc::CallBuiltin("instance_exists", nullptr, nullptr, { SwapCards[0] })) == 1.0
-            && double(Misc::CallBuiltin("instance_exists", nullptr, nullptr, { SwapCards[1] })) == 1.0)
-        {
-            // get vars
-            YYRValue firstnum = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { SwapCards[0] , "card_number" });
-            YYRValue secondnum = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { SwapCards[1] , "card_number" });
-            Misc::Print("nums: " + std::to_string(int(firstnum)) + "/" + std::to_string(int(secondnum)));
-            Misc::CallBuiltin("variable_instance_set", nullptr, nullptr, { SwapCards[0] , "card_number", secondnum });
-            Misc::CallBuiltin("variable_instance_set", nullptr, nullptr, { SwapCards[1] , "card_number", firstnum});
-        }
-
-        SwapCards.clear();
-    }
+  
     /*if (Misc::StringHasSubstr(codeObj->i_pName, "gml_Object") && (Misc::StringHasSubstr(codeObj->i_pName, "create") || Misc::StringHasSubstr(codeObj->i_pName, "Create")))
     {
         
@@ -365,7 +313,7 @@ DllExport YYTKStatus PluginEntry(
     YYTKPlugin* PluginObject // A pointer to the dedicated plugin object
 )
 {
-    Misc::Print("Hello World");
+    Misc::Print("Dumper is loaded!", CLR_RED);
     gThisPlugin = PluginObject;
     gThisPlugin->PluginUnload = PluginUnload;
 
@@ -373,7 +321,7 @@ DllExport YYTKStatus PluginEntry(
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)
     {
         PmCreateCallback(pluginAttributes, callbackAttr, reinterpret_cast<FNEventHandler>(ExecuteCodeCallback), EVT_CODE_EXECUTE, nullptr);
-        PmCreateCallback(pluginAttributes, frameCallbackAttr, FrameCallback, static_cast<EventType>(EVT_PRESENT | EVT_ENDSCENE), nullptr);
+        PmCreateCallback(pluginAttributes, frameCallbackAttr, FrameCallback, static_cast<EventType>(EVT_PRESENT /* | EVT_ENDSCENE*/), nullptr);
     }
 
     // Initialize the plugin, set callbacks inside the PluginObject.
@@ -414,14 +362,6 @@ DWORD WINAPI Menu(HINSTANCE hModule)
         {
             Misc::Print("Turning on Debug mode");
             enableDebug();
-            Sleep(300);
-        }
-        if (GetAsyncKeyState(VK_NUMPAD5))
-        {
-            Misc::Print("bruh");
-            YYRValue iid = Misc::CallBuiltin("get_integer", nullptr, nullptr, { "instance id", 0.0 });
-            YYRValue str = Misc::CallBuiltin("get_string", nullptr, nullptr, { "var name", "text" });
-            arrayShit(iid, str);
             Sleep(300);
         }
         if (GetAsyncKeyState(VK_NUMPAD6))
