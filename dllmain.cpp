@@ -27,6 +27,9 @@ ID3D11Device* g_Device = nullptr;
 ID3D11DeviceContext* g_Context = nullptr;
 HWND g_hWnd = nullptr;
 ID3D11RenderTargetView* g_RTV = nullptr;
+WNDPROC g_OriginalWndProc = nullptr;
+// Forward declaration so the compiler knows it exists
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 
 void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
@@ -197,20 +200,19 @@ YYTKStatus PluginUnload()
     return YYTK_OK;
 }
 
+// Custom WndProc to forward messages to ImGui
+LRESULT CALLBACK MyWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam))
+        return true; // ImGui handled it
+
+    return CallWindowProc(g_OriginalWndProc, hWnd, uMsg, wParam, lParam);
+}
+
 YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 {
    
-    /*if (pEvent->GetEventType() == EVT_ENDSCENE)
-    {
-        YYTKEndSceneEvent* pEndSceneEvent = (YYTKEndSceneEvent*)pEvent;
-        auto& args = pEndSceneEvent->Arguments();
-
-        // Get the D3D9 device (first argument in the tuple)
-        IDirect3DDevice9* pD3D9 = std::get<0>(args);
-
-        // Now you can use pD3D9!
-    }
-    else*/ if (pEvent->GetEventType() == EVT_PRESENT)
+    if (pEvent->GetEventType() == EVT_PRESENT)
     {
         
         YYTKPresentEvent* pPresentEvent = (YYTKPresentEvent*)pEvent;
@@ -232,6 +234,10 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 pSwapChain->GetDesc(&desc);
                 g_hWnd = desc.OutputWindow;
 
+                // Hook WndProc BEFORE initializing ImGui
+                g_OriginalWndProc = (WNDPROC)SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)MyWndProc);
+                
+                // 
                 ImGui::CreateContext();
                 ImGui_ImplWin32_Init(g_hWnd);
                 ImGui_ImplDX11_Init(g_Device, g_Context);
