@@ -34,7 +34,6 @@ bool g_recordCreateEvents = false;
 
 // other
 std::map<int, std::vector<std::string>> g_InstanceVars;
-bool g_ShouldRefresh = false;
 
 void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
 {
@@ -193,7 +192,48 @@ void getObjectAtMousePos()
     YYRValue arr;
     Misc::GetInstanceVariables(arr, obj);
     Misc::Print("______________" + std::to_string((int)obj), Color::CLR_AQUA);
-    Misc::PrintArrayInstanceVariables(arr,obj, Color::CLR_AQUA);
+    Misc::PrintArrayInstanceVariables(arr,obj);
+}
+
+void DrawInstanceVariables(YYRValue inst)
+{
+    YYRValue varr, len, item, content, type;
+
+    // Fetch variables for THIS instance only
+    Misc::GetInstanceVariables(varr, inst);
+
+    CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
+    int count = (int)len;
+
+    for (int i = 0; i < count; i++)
+    {
+        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
+
+        std::string varName = static_cast<const char*>(item);
+
+        CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName.c_str() });
+        CallBuiltin(type, "typeof", nullptr, nullptr, { content });
+
+        std::string typeStr = static_cast<const char*>(type);
+
+        if (typeStr == "number")
+        {
+            ImGui::Text("%s (%s): %.2f", varName.c_str(), typeStr.c_str(), (double)content);
+        }
+        else if (typeStr == "bool")
+        {
+            ImGui::Text("%s (%s): %s", varName.c_str(), typeStr.c_str(), (bool)content ? "true" : "false");
+        }
+        else if (typeStr == "string")
+        {
+            std::string valueStr = static_cast<const char*>(content);
+            ImGui::Text("%s (%s): %s", varName.c_str(), typeStr.c_str(), valueStr.c_str());
+        }
+        else
+        {
+            ImGui::Text("%s (%s)", varName.c_str(), typeStr.c_str());
+        }
+    }
 }
 
 // Unload
@@ -316,17 +356,8 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
         if (g_showObjects)
         {
             ImGui::Begin("Object explorer");
+            // refresh cache
             if (ImGui::Button("Refresh"))
-            {
-                g_ShouldRefresh = true;
-            }
-
-            ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
-
-            YYRValue allObjs, iid, varr, len, item;
-
-            // Refresh instance var cache
-            if (g_ShouldRefresh)
             {
                 g_InstanceVars.clear();
 
@@ -351,25 +382,32 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                         CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)varIndex });
 
                         const char* varName = static_cast<const char*>(item);
-                        vars.push_back(varName);
+                        vars.emplace_back(varName ? varName : "");
                     }
 
-                    g_InstanceVars[(int)iid] = vars;
+                    g_InstanceVars[(int)iid] = std::move(vars);
                 }
-
-                g_ShouldRefresh = false;
             }
-            // render cache
+
+            //Variable display
+            ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
             for (const auto& [iid, vars] : g_InstanceVars)
             {
                 std::string label = "Instance " + std::to_string(iid);
 
                 if (ImGui::CollapsingHeader(label.c_str()))
                 {
-                    for (const auto& var : vars)
+                    auto it = g_createEvents.find(iid);
+                    if (it != g_createEvents.end())
                     {
-                        ImGui::Text("%s", var.c_str());
+                        ImGui::Text("CreateEvent:\n%s", it->second.c_str());
                     }
+
+                    // Only fetch values WHEN OPEN
+                    YYRValue inst;
+                    inst = (double)iid;
+
+                    DrawInstanceVariables(inst);
                 }
             }
 

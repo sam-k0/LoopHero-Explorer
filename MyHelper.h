@@ -162,59 +162,53 @@ namespace Misc {
         }
     }
 
-    void PrintArrayInstanceVariables(YYRValue var,YYRValue inst, Color c = Color::CLR_DEFAULT)
+    void PrintArrayInstanceVariables(YYRValue var, YYRValue inst)
     {
-        YYRValue len;
-        YYRValue item;
-        YYRValue content;
-        YYRValue type;
-        CallBuiltin(len, "array_length_1d", nullptr, nullptr, { var });
-        Misc::Print((int)len);
+        YYRValue len, item, content, type;
 
-        for (int i = 0; i < (int)len; i++)
+        CallBuiltin(len, "array_length_1d", nullptr, nullptr, { var });
+        int count = (int)len;
+
+        for (int i = 0; i < count; i++)
         {
             CallBuiltin(item, "array_get", nullptr, nullptr, { var, (double)i });
-            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, static_cast<const char*>(item) });
+
+            // SAFE: copy variable name immediately
+            const char* itemPtr = static_cast<const char*>(item);
+            std::string varName = itemPtr ? itemPtr : "";
+
+            // Get value
+            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName.c_str() });
+
+            // Get type
             CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-            std::string typestr = std::string(static_cast<const char*>(type));
-           /*/ Misc::Print(std::string(static_cast<const char*>(item)), c); //var name
-            
-            Misc::Print("->" +typestr);
 
-            if (typestr == "number")
-            {
-                Misc::Print("->"+std::to_string((int)content));
-            }
-            else
-            if (typestr == "bool")
-            {
-                Misc::Print("->" + std::to_string(int((bool)content)));
-            }
-            else if (typestr == "string")
-            {
-                Misc::Print("->" + std::string(static_cast<const char*>(content)));
-            }
-            */
+            const char* typePtr = static_cast<const char*>(type);
+            std::string typeStr = typePtr ? typePtr : "unknown";
 
-            std::string message = std::string(static_cast<const char*>(item)) + " -> " + std::string(static_cast<const char*>(type));
+            std::string message = varName + " -> " + typeStr;
 
-            if (typestr == "number")
+            // Extract value safely
+            if (typeStr == "number")
             {
-                message += " : " + std::to_string((int)content);
+                message += " : " + std::to_string((double)content);
             }
-            else if (typestr == "bool")
+            else if (typeStr == "bool")
             {
-                message += " : " + std::to_string(int((bool)content));
+                message += " : " + std::to_string((bool)content ? 1 : 0);
             }
-            else if (typestr == "string")
+            else if (typeStr == "string")
             {
-                message += " : " + std::string(static_cast<const char*>(content));
+                const char* strPtr = static_cast<const char*>(content);
+                std::string valueStr = strPtr ? strPtr : "";
+                message += " : " + valueStr;
             }
 
-            Misc::Print(message);            
+            Misc::Print(message);
         }
     }
 
+   
 
     void GetObjectInstanceVariables(YYRValue& arr, int objectType)
     {
