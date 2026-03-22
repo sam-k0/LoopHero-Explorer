@@ -11,6 +11,7 @@
 #include <iterator>
 #include <map>
 #include <iostream>
+#include <format>
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_dx11.h"
@@ -30,10 +31,12 @@ WNDPROC g_OriginalWndProc = nullptr;
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 // imgui states
 bool g_showObjects = false;
-bool g_recordCreateEvents = false;
+bool g_recordCreateEvents = true;
 
 // other
-std::map<int, std::vector<std::string>> g_InstanceVars;
+std::vector<int> g_InstanceIds;
+std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
+int g_PendingFetch = -1;
 
 void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
 {
@@ -131,20 +134,6 @@ void enableDebug()
     Misc::CallBuiltin("show_debug_overlay", nullptr, nullptr, {1.0});
 }
 
-void arrayShit(int iid, std::string arrname)
-{
-    YYRValue type;
-    YYRValue arr = Misc::CallBuiltin("variable_instance_get", nullptr, nullptr, { double(iid), arrname });
-    CallBuiltin(type, "typeof", nullptr, nullptr, { arr });
-    std::string typestr = std::string(static_cast<const char*>(type));
-    if (typestr == "array")
-    {
-        Misc::PrintArray(arr);
-    }
-   
-    
-}
-
 void dumpVars()
 {
     Misc::Print("Dumping shit:");
@@ -181,7 +170,6 @@ void printAllObjects()
     
 }
 
-
 void getObjectAtMousePos()
 {
     YYRValue mx = Misc::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
@@ -195,45 +183,42 @@ void getObjectAtMousePos()
     Misc::PrintArrayInstanceVariables(arr,obj);
 }
 
-void DrawInstanceVariables(YYRValue inst)
+
+std::vector<VarInfo> FetchInstanceVariables(double inst)
 {
-    YYRValue varr, len, item, content, type;
+    std::vector<VarInfo> result;
 
-    // Fetch variables for THIS instance only
-    Misc::GetInstanceVariables(varr, inst);
+    YYRValue varr = Misc::CallBuiltinA("variable_instance_get_names", { inst });
+    YYRValue len = Misc::CallBuiltinA("array_length_1d", { varr });
 
-    CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
-    int count = (int)len;
+    int count = len.As<double>();
 
     for (int i = 0; i < count; i++)
     {
-        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
+        YYRValue item, content, type;
 
-        std::string varName = static_cast<const char*>(item);
+        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
+        std::string varName = DCS(item);
 
         CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName.c_str() });
         CallBuiltin(type, "typeof", nullptr, nullptr, { content });
 
-        std::string typeStr = static_cast<const char*>(type);
+        std::string typeStr = DCS(type);
+        std::string valueStr;
 
         if (typeStr == "number")
-        {
-            ImGui::Text("%s (%s): %.2f", varName.c_str(), typeStr.c_str(), (double)content);
-        }
+            valueStr = std::to_string(double(content));
         else if (typeStr == "bool")
-        {
-            ImGui::Text("%s (%s): %s", varName.c_str(), typeStr.c_str(), (bool)content ? "true" : "false");
-        }
+            valueStr = bool(content) ? "true" : "false";
         else if (typeStr == "string")
-        {
-            std::string valueStr = static_cast<const char*>(content);
-            ImGui::Text("%s (%s): %s", varName.c_str(), typeStr.c_str(), valueStr.c_str());
-        }
+            valueStr = DCS(content);
         else
-        {
-            ImGui::Text("%s (%s)", varName.c_str(), typeStr.c_str());
-        }
+            valueStr = "<unknown>";
+
+        result.push_back({ varName, typeStr, valueStr });
     }
+
+    return result; // fully safe snapshot
 }
 
 // Unload
@@ -312,8 +297,10 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             g_showObjects = !g_showObjects;
             //ShowCursor(FALSE); 
         }
+     
         if (ImGui::Button("Record create events"))
         {
+            g_recordCreateEvents = !g_recordCreateEvents;
             Misc::Print("Recording create events: "+std::to_string(g_recordCreateEvents));
         }
         if (ImGui::Button("Dump create events"))
@@ -341,7 +328,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             Misc::Print("Turning on Debug mode");
             enableDebug();
         }
-        if (ImGui::Button("Dump obj var names"))
+        if (ImGui::Button("Print all obj"))
         {
             Misc::Print("dumping var names");
             printAllObjects();
@@ -359,7 +346,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             // refresh cache
             if (ImGui::Button("Refresh"))
             {
-                g_InstanceVars.clear();
+                g_InstanceIds.clear();
 
                 YYRValue allObjs, iid, varr, len, item;
 
@@ -370,44 +357,49 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 {
                     CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)objIndex });
 
-                    Misc::GetInstanceVariables(varr, iid);
-
-                    CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
-                    int varCount = (int)len;
-
-                    std::vector<std::string> vars;
-
-                    for (int varIndex = 0; varIndex < varCount; varIndex++)
-                    {
-                        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)varIndex });
-
-                        const char* varName = static_cast<const char*>(item);
-                        vars.emplace_back(varName ? varName : "");
-                    }
-
-                    g_InstanceVars[(int)iid] = std::move(vars);
+                    g_InstanceIds.push_back(int(iid));
                 }
             }
 
             //Variable display
             ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
-            for (const auto& [iid, vars] : g_InstanceVars)
+            for (const auto& iid : g_InstanceIds)
             {
                 std::string label = "Instance " + std::to_string(iid);
+                auto it = g_createEvents.find(iid);
+                if (it != g_createEvents.end())
+                {
+                    label = label + " (" + it->second.c_str() + ")";
+                }
+
+                
 
                 if (ImGui::CollapsingHeader(label.c_str()))
                 {
-                    auto it = g_createEvents.find(iid);
-                    if (it != g_createEvents.end())
+                    if (ImGui::Button(("Refresh##" + std::to_string(iid)).c_str()))
                     {
-                        ImGui::Text("CreateEvent:\n%s", it->second.c_str());
+                        g_PendingFetch = iid;
                     }
 
-                    // Only fetch values WHEN OPEN
-                    YYRValue inst;
-                    inst = (double)iid;
+                    
 
-                    DrawInstanceVariables(inst);
+                    // Only fetch values WHEN OPEN
+                    if (bool(Misc::CallBuiltinA("instance_exists", { double(iid) })))
+                    {
+                        for (const auto& var : g_InstanceVarInfo[iid])
+                        {
+                            ImGui::Text("%s (%s): %s",
+                                var.name.c_str(),
+                                var.type.c_str(),
+                                var.value.c_str());
+                        }
+                    }
+                    else
+                    {
+                        ImGui::TextColored({ 255,0,0,255 }, "Does not exist anymore");
+                    }
+
+                    
                 }
             }
 
@@ -445,23 +437,15 @@ YYTKStatus ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
             g_createEvents.insert(std::make_pair(selfInst->i_spriteindex, codeObj->i_pName));
         }
     }
-    
-    /*
-    if (Misc::StringHasSubstr(codeObj->i_pName, "o_menu_Draw_0"))
+
+    if (g_PendingFetch != -1)
     {
-      
-    }*/
+        int iid = g_PendingFetch;
+        g_PendingFetch = -1;
 
-  
-    /*if (Misc::StringHasSubstr(codeObj->i_pName, "gml_Object") && (Misc::StringHasSubstr(codeObj->i_pName, "create") || Misc::StringHasSubstr(codeObj->i_pName, "Create")))
-    {
-        
-        PrintMessage(CLR_DEFAULT, "%s SpriteID: %d", codeObj->i_pName, selfInst->i_spriteindex);
- 
-    }*/
+        g_InstanceVarInfo[iid] = FetchInstanceVariables(iid);
+    }
     
-
-
     return YYTK_OK;
 }
 
@@ -486,57 +470,7 @@ DllExport YYTKStatus PluginEntry(
     // Set-up buffers.
     return YYTK_OK; // Successful PluginEntry.
 }
-/*
-DWORD WINAPI Menu(HINSTANCE hModule)
-{
-    while (true)
-    {
-        Sleep(50);
-        if (GetAsyncKeyState(VK_NUMPAD0))
-        {
-            Misc::Print("Dumping to file!");
-            Misc::VectorToFile(&obj_create_events);
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD1))
-        {
-            Misc::Print("Resetting event vector");
-            obj_create_events.clear();
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD2))
-        {
-            Misc::Print("Dumping sprite names with ID");
-            dumpSpriteIDs();
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD3))
-        {
-            Misc::Print("Dumping object names with ID");
-            dumpObjectIDs();
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD4))
-        {
-            Misc::Print("Turning on Debug mode");
-            enableDebug();
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD6))
-        {
-            Misc::Print("dumping var names");
-            printAllObjects();
-            
-        }
-        if (GetAsyncKeyState(VK_NUMPAD7))
-        {
-            Misc::Print("obj at pos");
-            getObjectAtMousePos();
-            
-        }
-    }
-}
-*/
+
 BOOL APIENTRY DllMain( HMODULE hModule,
                        DWORD  ul_reason_for_call,
                        LPVOID lpReserved

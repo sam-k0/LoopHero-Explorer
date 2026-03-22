@@ -22,7 +22,27 @@ CallbackAttributes_t* callbackAttr = nullptr;
 std::map<int,std::string> g_createEvents; // instance id to event
 int g_DumpNum = 0;
 
+std::string DCS(YYRValue val)
+{
+    // Try to get C string from YYRValue
+    const char* strPtr = static_cast<const char*>(val);
 
+    if (strPtr)
+    {
+        // std::string constructor makes a deep copy
+        return std::string(strPtr);
+    }
+    else
+    {
+        return std::string();
+    }
+}
+
+struct VarInfo {
+    std::string name;
+    std::string type;
+    std::string value;
+};
 
 namespace Misc {
     void Print(std::string s, Color c = CLR_DEFAULT)
@@ -220,6 +240,7 @@ namespace Misc {
 
     }
 
+    //may be faulty
     void GetInstanceVariables(YYRValue& arr, YYRValue inst)
     {
         CallBuiltin(arr, "variable_instance_get_names", nullptr, nullptr, { inst });
