@@ -4,6 +4,7 @@
 #include <string>
 #include <Windows.h>
 #include <vector>
+#include <map>
 #include <direct.h>
 #include <ostream>
 #include <sstream>
@@ -18,8 +19,8 @@ std::string gPluginName = "Dumper";
 YYTKPlugin* gThisPlugin = nullptr;
 CallbackAttributes_t* callbackAttr = nullptr;
 
-std::vector<std::string> obj_create_events; // holds all strings of code events that got triggered
-int gDumpNum = 0;
+std::map<int,std::string> g_createEvents; // instance id to event
+int g_DumpNum = 0;
 
 
 
@@ -62,17 +63,36 @@ namespace Misc {
 
     void VectorToFile(std::vector<std::string>* v)
     {
-        std::string fname = "./event_dump_" + std::to_string(gDumpNum) + ".txt";
+        std::string fname = "./event_dump_" + std::to_string(g_DumpNum) + ".txt";
         while (Filesys::FileExists(fname))
         {
-            fname = "./event_dump_" + std::to_string(gDumpNum) + ".txt";
-            gDumpNum++;
+            fname = "./event_dump_" + std::to_string(g_DumpNum) + ".txt";
+            g_DumpNum++;
         }
 
         Print("Dumping to file " + fname, CLR_RED);
         std::ofstream ofile(fname);
         std::ostream_iterator<std::string> oiter(ofile, "\n");
         std::copy(std::begin(*v), std::end(*v), oiter);
+    }
+
+    void MapToFile(std::map<int, std::string>* m)
+    {
+        std::string fname = "./event_dump_" + std::to_string(g_DumpNum) + ".txt";
+        while (Filesys::FileExists(fname))
+        {
+            g_DumpNum++;
+            fname = "./event_dump_" + std::to_string(g_DumpNum) + ".txt";
+        }
+
+        Print("Dumping to file " + fname, CLR_RED);
+
+        std::ofstream ofile(fname);
+
+        for (const auto& [instanceID, str] : *m)
+        {
+            ofile << instanceID << " # " << str << "\n";
+        }
     }
 
     // checks if a string s contains a substring subs

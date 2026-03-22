@@ -19,7 +19,6 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 
-std::vector<YYRValue> SwapCards;
 CallbackAttributes_t* frameCallbackAttr;
 // imgui
 bool g_ImGuiInitialized = false;
@@ -28,9 +27,14 @@ ID3D11DeviceContext* g_Context = nullptr;
 HWND g_hWnd = nullptr;
 ID3D11RenderTargetView* g_RTV = nullptr;
 WNDPROC g_OriginalWndProc = nullptr;
-// Forward declaration so the compiler knows it exists
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+// imgui states
+bool g_showObjects = false;
+bool g_recordCreateEvents = false;
 
+// other
+std::map<int, std::vector<std::string>> g_InstanceVars;
+bool g_ShouldRefresh = false;
 
 void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
 {
@@ -211,65 +215,172 @@ LRESULT CALLBACK MyWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 {
-   
-    if (pEvent->GetEventType() == EVT_PRESENT)
+    YYTKPresentEvent* pPresentEvent = (YYTKPresentEvent*)pEvent;
+    auto& args = pPresentEvent->Arguments();
+
+    // Get the arguments (SwapChain, Sync, Flags)
+    IDXGISwapChain* pSwapChain = std::get<0>(args);
+    UINT Sync = std::get<1>(args);
+    UINT Flags = std::get<2>(args);
+
+
+    if (!g_ImGuiInitialized)
     {
-        
-        YYTKPresentEvent* pPresentEvent = (YYTKPresentEvent*)pEvent;
-        auto& args = pPresentEvent->Arguments();
-
-        // Get the arguments (SwapChain, Sync, Flags)
-        IDXGISwapChain* pSwapChain = std::get<0>(args);
-        UINT Sync = std::get<1>(args);
-        UINT Flags = std::get<2>(args);
-
-
-        if (!g_ImGuiInitialized)
+        if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&g_Device)))
         {
-            if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&g_Device)))
-            {
-                g_Device->GetImmediateContext(&g_Context);
+            g_Device->GetImmediateContext(&g_Context);
 
-                DXGI_SWAP_CHAIN_DESC desc;
-                pSwapChain->GetDesc(&desc);
-                g_hWnd = desc.OutputWindow;
+            DXGI_SWAP_CHAIN_DESC desc;
+            pSwapChain->GetDesc(&desc);
+            g_hWnd = desc.OutputWindow;
 
-                // Hook WndProc BEFORE initializing ImGui
-                g_OriginalWndProc = (WNDPROC)SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)MyWndProc);
+            // Hook WndProc before initializing ImGui
+            g_OriginalWndProc = (WNDPROC)SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)MyWndProc);
                 
-                // 
-                ImGui::CreateContext();
-                ImGui_ImplWin32_Init(g_hWnd);
-                ImGui_ImplDX11_Init(g_Device, g_Context);
+            // 
+            ImGui::CreateContext();
+            ImGui_ImplWin32_Init(g_hWnd);
+            ImGui_ImplDX11_Init(g_Device, g_Context);
 
-                ID3D11Texture2D* pBackBuffer = nullptr;
-                pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
+            ID3D11Texture2D* pBackBuffer = nullptr;
+            pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
 
-                if (pBackBuffer)
+            if (pBackBuffer)
+            {
+                g_Device->CreateRenderTargetView(pBackBuffer, NULL, &g_RTV);
+                pBackBuffer->Release();
+            }
+
+            g_ImGuiInitialized = true;
+            Misc::Print("Initialized imgui!");
+                
+        }
+    }
+    if (g_ImGuiInitialized)
+    {
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        // UI elems
+        ImGui::Begin("Loop Hero Explorer");
+        ImGui::Text("ImGui injected successfully!");
+        if (ImGui::Button("Object explorer"))
+        {
+            // This runs when the button is clicked
+            Misc::Print("Show object explorer");
+            g_showObjects = !g_showObjects;
+            //ShowCursor(FALSE); 
+        }
+        if (ImGui::Button("Record create events"))
+        {
+            Misc::Print("Recording create events: "+std::to_string(g_recordCreateEvents));
+        }
+        if (ImGui::Button("Dump create events"))
+        {
+            Misc::Print("Dumping to file!");
+            Misc::MapToFile(&g_createEvents);           
+        }
+        if (ImGui::Button("Reset event storage"))
+        {
+            Misc::Print("Resetting event vector");
+            g_createEvents.clear();
+        }
+        if (ImGui::Button("Dump sprite names with ID"))
+        {
+            Misc::Print("Dumping sprite names with ID");
+            dumpSpriteIDs();
+        }
+        if (ImGui::Button("Dump object names with ID"))
+        {
+            Misc::Print("Dumping object names with ID");
+            dumpObjectIDs();
+        }
+        if (ImGui::Button("Debug Mode"))
+        {
+            Misc::Print("Turning on Debug mode");
+            enableDebug();
+        }
+        if (ImGui::Button("Dump obj var names"))
+        {
+            Misc::Print("dumping var names");
+            printAllObjects();
+        }
+        if (ImGui::Button("Obj at cursor pos"))
+        {
+            Misc::Print("obj at pos");
+            getObjectAtMousePos();
+        }
+        ImGui::End();
+
+        if (g_showObjects)
+        {
+            ImGui::Begin("Object explorer");
+            if (ImGui::Button("Refresh"))
+            {
+                g_ShouldRefresh = true;
+            }
+
+            ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
+
+            YYRValue allObjs, iid, varr, len, item;
+
+            // Refresh instance var cache
+            if (g_ShouldRefresh)
+            {
+                g_InstanceVars.clear();
+
+                YYRValue allObjs, iid, varr, len, item;
+
+                CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
+                int count = (int)allObjs;
+
+                for (int objIndex = 0; objIndex < count; objIndex++)
                 {
-                    g_Device->CreateRenderTargetView(pBackBuffer, NULL, &g_RTV);
-                    pBackBuffer->Release();
+                    CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)objIndex });
+
+                    Misc::GetInstanceVariables(varr, iid);
+
+                    CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
+                    int varCount = (int)len;
+
+                    std::vector<std::string> vars;
+
+                    for (int varIndex = 0; varIndex < varCount; varIndex++)
+                    {
+                        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)varIndex });
+
+                        const char* varName = static_cast<const char*>(item);
+                        vars.push_back(varName);
+                    }
+
+                    g_InstanceVars[(int)iid] = vars;
                 }
 
-                g_ImGuiInitialized = true;
-                Misc::Print("Initialized imgui!");
+                g_ShouldRefresh = false;
             }
-        }
-        if (g_ImGuiInitialized)
-        {
-            ImGui_ImplDX11_NewFrame();
-            ImGui_ImplWin32_NewFrame();
-            ImGui::NewFrame();
+            // render cache
+            for (const auto& [iid, vars] : g_InstanceVars)
+            {
+                std::string label = "Instance " + std::to_string(iid);
 
-            // Your UI
-            ImGui::Begin("Loop Hero Mod");
-            ImGui::Text("ImGui injected successfully!");
+                if (ImGui::CollapsingHeader(label.c_str()))
+                {
+                    for (const auto& var : vars)
+                    {
+                        ImGui::Text("%s", var.c_str());
+                    }
+                }
+            }
+
+            ImGui::EndChild();
             ImGui::End();
-
-            ImGui::Render();
-            g_Context->OMSetRenderTargets(1, &g_RTV, NULL);
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
+           
+
+        ImGui::Render();
+        g_Context->OMSetRenderTargets(1, &g_RTV, NULL);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     }
 
     return YYTK_OK;
@@ -289,11 +400,14 @@ YYTKStatus ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
     if (!codeObj->i_pName)
         return YYTK_INVALIDARG;
     
-    if (Misc::StringHasSubstr(codeObj->i_pName, "gml_Room_rm_game_Create"))
+    if (g_recordCreateEvents)
     {
-        SwapCards.clear();
+        if (Misc::StringHasSubstr(codeObj->i_pName, "Create") && Misc::StringHasSubstr(codeObj->i_pName, "gml_Object"))
+        {
+            g_createEvents.insert(std::make_pair(selfInst->i_spriteindex, codeObj->i_pName));
+        }
     }
-
+    
     /*
     if (Misc::StringHasSubstr(codeObj->i_pName, "o_menu_Draw_0"))
     {
@@ -327,14 +441,14 @@ DllExport YYTKStatus PluginEntry(
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)
     {
         PmCreateCallback(pluginAttributes, callbackAttr, reinterpret_cast<FNEventHandler>(ExecuteCodeCallback), EVT_CODE_EXECUTE, nullptr);
-        PmCreateCallback(pluginAttributes, frameCallbackAttr, FrameCallback, static_cast<EventType>(EVT_PRESENT /* | EVT_ENDSCENE*/), nullptr);
+        PmCreateCallback(pluginAttributes, frameCallbackAttr, FrameCallback, static_cast<EventType>(EVT_PRESENT), nullptr);
     }
 
     // Initialize the plugin, set callbacks inside the PluginObject.
     // Set-up buffers.
     return YYTK_OK; // Successful PluginEntry.
 }
-
+/*
 DWORD WINAPI Menu(HINSTANCE hModule)
 {
     while (true)
@@ -344,47 +458,47 @@ DWORD WINAPI Menu(HINSTANCE hModule)
         {
             Misc::Print("Dumping to file!");
             Misc::VectorToFile(&obj_create_events);
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD1))
         {
             Misc::Print("Resetting event vector");
             obj_create_events.clear();
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD2))
         {
             Misc::Print("Dumping sprite names with ID");
             dumpSpriteIDs();
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD3))
         {
             Misc::Print("Dumping object names with ID");
             dumpObjectIDs();
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD4))
         {
             Misc::Print("Turning on Debug mode");
             enableDebug();
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD6))
         {
             Misc::Print("dumping var names");
             printAllObjects();
-            Sleep(300);
+            
         }
         if (GetAsyncKeyState(VK_NUMPAD7))
         {
             Misc::Print("obj at pos");
             getObjectAtMousePos();
-            Sleep(300);
+            
         }
     }
 }
-
+*/
 BOOL APIENTRY DllMain( HMODULE hModule,
                        DWORD  ul_reason_for_call,
                        LPVOID lpReserved
@@ -394,7 +508,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     {
     case DLL_PROCESS_ATTACH:
         DllHandle = hModule;
-        CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Menu, NULL, 0, NULL); // For the input
+        //CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Menu, NULL, 0, NULL); // For the input
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
