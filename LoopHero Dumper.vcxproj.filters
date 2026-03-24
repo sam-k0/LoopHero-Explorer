@@ -128,7 +128,7 @@
     <ClInclude Include="SDK\Structures\Undocumented\YYVAR\YYVAR.hpp">
       <Filter>Header Files\SDK</Filter>
     </ClInclude>
-    <ClInclude Include="MyHelper.h">
+    <ClInclude Include="MyPlugin.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LHSprites.h">
@@ -151,6 +151,9 @@
     </ClInclude>
     <ClInclude Include="imgui\imgui_internal.h">
       <Filter>Header Files\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="LHCore.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
