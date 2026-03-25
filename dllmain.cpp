@@ -14,12 +14,12 @@
 #include <iostream>
 #include <format>
 
+#include "ObjectMaps.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_dx11.h"
 #include "imgui/imgui_impl_win32.h"
 
 #define _CRT_SECURE_NO_WARNINGS
-#define NOFETCH -99 // do not fetch any instance
 #define FPSBUFSIZE 120
 
 CallbackAttributes_t* frameCallbackAttr;
@@ -321,6 +321,73 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
         ImGui::Begin("Loop Hero Explorer");
 #pragma region Top Level Buttons
         
+        if (ImGui::Button("Dump"))
+        {
+            YYRValue allObjs, iid;
+            std::vector<int> outIDs;
+
+            CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
+            int count = (int)allObjs;
+
+            for (int i = 0; i < count; i++)
+            {
+                CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)i });
+                outIDs.push_back((int)iid);
+            }
+            // map onto vars
+            std::map<int, std::vector<std::string>> result;
+
+            for (int iid : outIDs)
+            {
+                YYRValue inst = (double)iid;
+
+                // get object_index
+                YYRValue objIndexVal;
+                CallBuiltin(objIndexVal, "variable_instance_get", nullptr, nullptr, { inst, "object_index" });
+                int objIndex = (int)objIndexVal;
+
+                // get variable names (unsafe array, so copy immediately!)
+                YYRValue varr, len, item;
+                Binds::GetInstanceVariables(varr, inst);
+
+                CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
+                int count = (int)len;
+
+                auto& vec = result[objIndex];
+
+                for (int i = 0; i < count; i++)
+                {
+                    CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
+
+                    std::string varName = DCS(item); // deep copy immediately
+
+                    // avoid duplicates
+                    if (std::find(vec.begin(), vec.end(), varName) == vec.end())
+                    {
+                        vec.push_back(varName);
+                    }
+                }
+            }
+            //write
+            std::ofstream file("object_vars_dump.txt");
+
+            for (const auto& [objIndex, vars] : result)
+            {
+                file << "{" << objIndex << " , {";
+
+                for (size_t i = 0; i < vars.size(); i++)
+                {
+                    file << "\"" << vars[i] << "\"";
+
+                    if (i < vars.size() - 1)
+                        file << ", ";
+                }
+
+                file << "}},\n";
+            }
+        }
+
+
         if (ImGui::CollapsingHeader("Variables"))
         {
             ImGui::Text(std::format("Only show parsed variables: {}", g_filterShowParsedOnly).c_str());
