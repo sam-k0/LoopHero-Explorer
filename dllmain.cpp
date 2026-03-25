@@ -513,7 +513,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
         
         ImGui::End();
 #pragma endregion
-
+        /*
         if (g_showObjects)
         {
             ImGui::Begin("Object explorer");
@@ -573,7 +573,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 
             ImGui::EndChild();
             ImGui::End();
-        }
+        }*/
 
         if (g_showObjectsSafe)
         {
@@ -600,8 +600,9 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
             for (const auto& iid : g_InstanceIds)
             {
-                std::string obj_name = LHObjects::GetObjectName((int)Binds::CallBuiltinA("variable_instance_get", { double(iid), "object_index" }));
-                std::string label = std::format("{}:{}", std::to_string(iid), obj_name);
+                int objid = (int)Binds::CallBuiltinA("variable_instance_get", { double(iid), "object_index" });
+                std::string obj_name = LHObjects::GetObjectName(objid);
+                std::string label = std::format("{}:{}({})", std::to_string(iid), obj_name,objid);
 
                 if (ImGui::CollapsingHeader(label.c_str()))
                 {
@@ -619,8 +620,13 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                             {
                                 if (var.value != "<unknown>" || !g_filterShowParsedOnly)
                                 {
-
-                                    ImGui::Text("%s (%s): %s",
+                                    ImVec4 col = ImVec4(255, 255, 255, 255);//white default
+                                    if (var.type != "number" && var.type != "string" && var.type != "bool")
+                                    {
+                                        col = ImVec4(255, 0, 0, 255); // red on unparsable
+                                    }
+                                    
+                                    ImGui::TextColored(col,"%s (%s): %s",
                                         var.name.c_str(),
                                         var.type.c_str(),
                                         var.value.c_str());
