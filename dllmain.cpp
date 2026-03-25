@@ -33,6 +33,7 @@ WNDPROC g_OriginalWndProc = nullptr;
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 // imgui states
 bool g_showObjects = false;
+bool g_showObjectsSafe = false;
 bool g_recordCreateEvents = true;
 bool g_showGlobals = false;
 bool g_showDebugOverlay = false;
@@ -237,6 +238,45 @@ std::vector<VarInfo> FetchInstanceVariables(double inst)
     return result; // fully safe snapshot
 }
 
+// exists will be false if 
+std::vector<VarInfo> FetchInstanceVariablesSafe(double inst, bool &exists)
+{
+    std::vector<VarInfo> result;
+
+    // Try to find inst in map
+    int oid = Binds::CallBuiltinA("variable_instance_get", { inst, "object_index" });
+
+    if(!g_ObjectVarNames.contains((int)oid))
+    {
+        Misc::Print(std::format("Instance id {} not found in map!", inst), CLR_RED);
+        exists = false;
+        return result;
+    }
+
+    exists = true;
+    for (const auto &it : g_ObjectVarNames.at((int)oid))
+    {
+        YYRValue item, content, type;
+        CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst,it.c_str() });
+        CallBuiltin(type, "typeof", nullptr, nullptr, { content });
+
+        std::string typeStr = DCS(type);
+        std::string valueStr;
+
+        if (typeStr == "number")
+            valueStr = std::to_string(double(content));
+        else if (typeStr == "bool")
+            valueStr = bool(content) ? "true" : "false";
+        else if (typeStr == "string")
+            valueStr = DCS(content);
+        else
+            valueStr = "<unknown>";
+
+        result.push_back({ it, typeStr, valueStr });
+    }
+    return result;
+}
+
 #pragma endregion
 
 YYTKStatus PluginUnload()
@@ -403,6 +443,11 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 g_showObjects = !g_showObjects;
             }
             ImGui::SameLine();
+            if (ImGui::Button("Safe Object explorer"))
+            {
+                Misc::Print("Show safe global explorer");
+                g_showObjectsSafe = !g_showObjectsSafe;
+            }
             if (ImGui::Button("Show global var explorer"))
             {
                 Misc::Print("Show global explorer");
@@ -523,6 +568,75 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                     {
                         ImGui::TextColored({ 255,0,0,255 }, "Does not exist anymore");
                     }
+                }
+            }
+
+            ImGui::EndChild();
+            ImGui::End();
+        }
+
+        if (g_showObjectsSafe)
+        {
+            ImGui::Begin("Safe Object explorer");
+            // refresh instance enumeration
+            if (ImGui::Button("Refresh"))
+            {
+                g_InstanceIds.clear();
+
+                YYRValue allObjs, iid, varr, len, item;
+
+                CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
+                int count = (int)allObjs;
+
+                for (int objIndex = 0; objIndex < count; objIndex++)
+                {
+                    CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)objIndex });
+
+                    g_InstanceIds.push_back(int(iid));
+                }
+            }
+
+            //Variable display
+            ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
+            for (const auto& iid : g_InstanceIds)
+            {
+                std::string obj_name = LHObjects::GetObjectName((int)Binds::CallBuiltinA("variable_instance_get", { double(iid), "object_index" }));
+                std::string label = std::format("{}:{}", std::to_string(iid), obj_name);
+
+                if (ImGui::CollapsingHeader(label.c_str()))
+                {
+                    bool exists = true;
+                    if (ImGui::Button(("Refresh##" + std::to_string(iid)).c_str()))
+                    {
+                        Misc::Print(std::format("Getting vars for instance {}", iid));
+                        g_InstanceVarInfo[iid] = FetchInstanceVariablesSafe(iid, exists);
+                    }
+                    if (exists)
+                    {
+                        if (bool(Binds::CallBuiltinA("instance_exists", { double(iid) })))
+                        {
+                            for (const auto& var : g_InstanceVarInfo[iid])
+                            {
+                                if (var.value != "<unknown>" || !g_filterShowParsedOnly)
+                                {
+
+                                    ImGui::Text("%s (%s): %s",
+                                        var.name.c_str(),
+                                        var.type.c_str(),
+                                        var.value.c_str());
+                                }
+                            }
+                        }
+                        else
+                        {
+                            ImGui::TextColored({ 255,0,0,255 }, "Does not exist anymore");
+                        }
+                    }
+                    else
+                    {
+                        ImGui::TextColored({ 255,0,0,255 }, "Not indexed!");
+                    }
+                    
                 }
             }
 
