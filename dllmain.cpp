@@ -13,6 +13,8 @@
 #include <map>
 #include <iostream>
 #include <format>
+#include <regex>
+#include <deque>
 
 #include "ObjectMaps.h"
 #include "imgui/imgui.h"
@@ -21,6 +23,7 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 #define FPSBUFSIZE 120
+#define MAXCMDHIST 5
 
 CallbackAttributes_t* frameCallbackAttr;
 // imgui
@@ -38,12 +41,15 @@ bool g_recordCreateEvents = true;
 bool g_showGlobals = false;
 bool g_showDebugOverlay = false;
 bool g_showFpsPlot = true;
-
+bool g_showRunCmd = false;
+bool g_filterShowParsedOnly = true;
 // other
 std::vector<int> g_InstanceIds;
 std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
 std::vector<VarInfo> g_GlobalVarInfo;
-bool g_filterShowParsedOnly = true;
+std::deque<std::string> g_commandHistory;
+
+char g_commandBuffer[512] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
@@ -238,52 +244,290 @@ std::vector<VarInfo> FetchInstanceVariables(double inst)
     return result; // fully safe snapshot
 }
 
-// exists will be false if 
+// exists will be false if not yet saved
 std::vector<VarInfo> FetchInstanceVariablesSafe(double inst, bool &exists)
 {
     std::vector<VarInfo> result;
-
+    int oid = INSTANCE_GLOBAL; // global inst doesnt have object index, so use as default
     // Try to find inst in map
-    int oid = Binds::CallBuiltinA("variable_instance_get", { inst, "object_index" });
-
-    if(!g_ObjectVarNames.contains((int)oid))
+    if (inst != INSTANCE_GLOBAL)
     {
-        Misc::Print(std::format("Instance id {} not found in map!", inst), CLR_RED);
-        exists = false;
-        return result;
-    }
+         oid = Binds::CallBuiltinA("variable_instance_get", { inst, "object_index" });
 
+        if (!g_ObjectVarNames.contains((int)oid))
+        {
+            Misc::Print(std::format("Instance id {} not found in map!", inst), CLR_RED);
+            exists = false;
+            return result;
+        }
+    }
+    
     exists = true;
     for (const auto &it : g_ObjectVarNames.at((int)oid))
     {
-        YYRValue item, content, type;
-        CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst,it.c_str() });
-        CallBuiltin(type, "typeof", nullptr, nullptr, { content });
+        YYRValue item, content, type, isset;
+        
+        // Check if the variable exists already (may be inited later, would be violation)
+        if (inst != INSTANCE_GLOBAL)
+        {
+            CallBuiltin(isset, "variable_instance_exists", nullptr, nullptr, { inst, it });
+        }
+        else // use this for globals, other doesnt work for some reason
+        {
+            CallBuiltin(isset, "variable_global_exists", nullptr, nullptr, { it });
+        }
+        
+        if (bool(isset)) // exists
+        {
+            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst,it });
+            CallBuiltin(type, "typeof", nullptr, nullptr, { content });
 
-        std::string typeStr = DCS(type);
-        std::string valueStr;
+            std::string typeStr = DCS(type);
+            std::string valueStr;
 
-        if (typeStr == "number")
-            valueStr = std::to_string(double(content));
-        else if (typeStr == "bool")
-            valueStr = bool(content) ? "true" : "false";
-        else if (typeStr == "string")
-            valueStr = DCS(content);
+            if (typeStr == "number")
+                valueStr = std::to_string(double(content));
+            else if (typeStr == "bool")
+                valueStr = bool(content) ? "true" : "false";
+            else if (typeStr == "string")
+                valueStr = DCS(content);
+            else
+                valueStr = "<unknown>";
+
+            result.push_back({ it, typeStr, valueStr });
+        }
         else
-            valueStr = "<unknown>";
+        {
+            result.push_back({ it, "<?type>", "<unset>" });
+        }
 
-        result.push_back({ it, typeStr, valueStr });
+       
     }
     return result;
 }
 
-#pragma endregion
-
-YYTKStatus PluginUnload()
+void FetchInstanceVarsDumpFile(double index,bool isobject,bool dumpparsable, const char* filename)
 {
-    LHCore::pUnregisterModule(gPluginName);
-    return YYTK_OK;
+
+    YYRValue allObjs, iid;
+    std::vector<int> outIDs;
+    if (isobject)
+    {
+        Misc::Print("Treating as object index, fetching all instances of type first...");
+        CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { index });
+        int count = (int)allObjs;
+
+        for (int i = 0; i < count; i++)
+        {
+            CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)i });
+            outIDs.push_back((int)iid);
+        }
+    }
+    else
+    {
+        Misc::Print("Treating as instance id, using index directly!");
+        outIDs.push_back(int(index));
+    }
+    // map onto vars
+    std::map<int, std::vector<std::string>> result;
+
+    for (int iid : outIDs)
+    {
+        YYRValue inst = (double)iid;
+
+        // get object_index
+        YYRValue objIndexVal;
+        CallBuiltin(objIndexVal, "variable_instance_get", nullptr, nullptr, { inst, "object_index" });
+        int objIndex = (int)objIndexVal;
+
+        // get variable names (unsafe array, so copy immediately!)
+        YYRValue varr, len, item;
+        Binds::GetInstanceVariables(varr, inst);
+
+        CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
+        int count = (int)len;
+
+        auto& vec = result[objIndex];
+
+        for (int i = 0; i < count; i++)
+        {
+            CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
+
+            std::string varName = DCS(item); // deep copy immediately
+
+            YYRValue type, content;
+            bool isok = true;
+            // check type 
+            if (dumpparsable)
+            {
+                CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName });
+                CallBuiltin(type, "typeof", nullptr, nullptr, { content });
+
+                std::string typeStr = DCS(type);
+                std::string valueStr;
+
+                if (typeStr != "number" && typeStr != "string" && typeStr != "bool")
+                {
+                    isok = false;
+                    Misc::Print(std::format("Skipping {} as type is unknown.", varName));
+                }
+                    
+            }
+           
+            if (isok)
+            {
+                // avoid duplicates
+                if (std::find(vec.begin(), vec.end(), varName) == vec.end())
+                {
+                    vec.push_back(varName);
+                }
+            }
+        }
+    }
+    //write
+    std::ofstream file(filename);
+
+    for (const auto& [objIndex, vars] : result)
+    {
+        file << "{" << objIndex << " , {";
+
+        for (size_t i = 0; i < vars.size(); i++)
+        {
+            file << "\"" << vars[i] << "\"";
+
+            if (i < vars.size() - 1)
+                file << ", ";
+        }
+
+        file << "}},\n";
+    }
 }
+
+static std::vector<std::string> Tokenize(const std::string& ref)
+{
+    std::vector<std::string> vResults;
+    size_t _beginFuncCall = ref.find_first_of('(');
+
+    if (_beginFuncCall == std::string::npos)
+    {
+        return {};
+    }
+
+    size_t _endFuncCall = ref.find_first_of(')');
+
+    if (_endFuncCall == std::string::npos)
+    {
+        return {};
+    }
+
+    // Function name
+    vResults.push_back(ref.substr(0, _beginFuncCall));
+
+    std::stringstream ss(ref.substr(_beginFuncCall + 1, _endFuncCall - _beginFuncCall));
+    std::string sCurItem;
+
+    while (std::getline(ss, sCurItem, ','))
+    {
+        sCurItem.erase(std::remove_if(sCurItem.begin(), sCurItem.end(), ::isspace), sCurItem.end());
+        if (sCurItem.find_first_of(')') != std::string::npos)
+        {
+            auto closePos = sCurItem.find_first_of(')');
+
+            sCurItem = sCurItem.substr(0, closePos);
+        }
+
+        if (!sCurItem.empty())
+            vResults.push_back(sCurItem);
+    }
+
+    return vResults;
+}
+
+bool RunCommand(const std::string &cmd)
+{
+    if (cmd.empty())
+        return false;
+
+    std::string cmdcopy = cmd;
+
+    std::regex regexAssignment(R"(global\.([a-zA-Z_]+)\s*=\s*(.*))");
+    std::regex regexPeek(R"(global\.([a-zA-Z_]+))");
+
+    if (std::regex_match(cmdcopy, regexAssignment))
+    {
+        cmdcopy = std::regex_replace(cmdcopy, regexAssignment, "variable_global_set(\"$1\", $2)");
+    }
+    else if (std::regex_match(cmdcopy, regexPeek))
+    {
+        cmdcopy = std::regex_replace(cmdcopy, regexPeek, "variable_global_get(\"$1\")");
+    }
+
+    std::regex validCall(R"(^[a-zA-Z_]\w*\(.*\)$)");
+
+    if (!std::regex_match(cmdcopy, validCall))
+    {
+        Misc::Print("Invalid syntax");
+        return false;
+    }
+
+    std::vector<std::string> tokens = Tokenize(cmdcopy);
+    if (tokens.empty())
+        return false;
+
+    const std::string& funcName = tokens[0];
+
+    // --- Prepare args ---
+    std::vector<YYRValue> args(tokens.size() - 1);
+
+    for (size_t i = 1; i < tokens.size(); i++)
+    {
+        const std::string& token = tokens[i];
+
+        if (std::regex_match(token, std::regex(R"(^-?\d+(\.\d+)?$)")))
+        {
+            args[i - 1] = std::stod(token);
+        }
+        else if (std::regex_match(token, std::regex(R"REGEX("([^"]*)")REGEX")))
+        {
+            args[i - 1] = token.substr(1, token.size() - 2);
+        }
+        else if (token == "true")
+        {
+            args[i - 1] = true;
+        }
+        else if (token == "false")
+        {
+            args[i - 1] = false;
+        }
+        else
+        {
+            Misc::Print("Unknown token: " + token);
+            return false;
+        }
+    }
+
+    // --- Call builtin ---
+    YYRValue result;
+
+    if (!CallBuiltin(result, funcName.c_str(), nullptr, nullptr, args))
+    {
+        Misc::Print("Call failed: " + funcName);
+        return false;
+    }
+
+    // --- Print result ---
+    if (result.As<RValue>().Kind == VALUE_REAL)
+        Misc::Print(std::format("{}", result.As<double>()));
+    else if (result.As<RValue>().Kind == VALUE_STRING)
+        Misc::Print(result.As<std::string>());
+    else
+        Misc::Print("<unknown result>");
+
+    return true;
+}
+
+
+#pragma endregion
 
 // Custom WndProc to forward messages to ImGui
 LRESULT CALLBACK MyWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -361,72 +605,6 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
         ImGui::Begin("Loop Hero Explorer");
 #pragma region Top Level Buttons
         
-        if (ImGui::Button("Dump"))
-        {
-            YYRValue allObjs, iid;
-            std::vector<int> outIDs;
-
-            CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
-            int count = (int)allObjs;
-
-            for (int i = 0; i < count; i++)
-            {
-                CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)i });
-                outIDs.push_back((int)iid);
-            }
-            // map onto vars
-            std::map<int, std::vector<std::string>> result;
-
-            for (int iid : outIDs)
-            {
-                YYRValue inst = (double)iid;
-
-                // get object_index
-                YYRValue objIndexVal;
-                CallBuiltin(objIndexVal, "variable_instance_get", nullptr, nullptr, { inst, "object_index" });
-                int objIndex = (int)objIndexVal;
-
-                // get variable names (unsafe array, so copy immediately!)
-                YYRValue varr, len, item;
-                Binds::GetInstanceVariables(varr, inst);
-
-                CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
-                int count = (int)len;
-
-                auto& vec = result[objIndex];
-
-                for (int i = 0; i < count; i++)
-                {
-                    CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
-
-                    std::string varName = DCS(item); // deep copy immediately
-
-                    // avoid duplicates
-                    if (std::find(vec.begin(), vec.end(), varName) == vec.end())
-                    {
-                        vec.push_back(varName);
-                    }
-                }
-            }
-            //write
-            std::ofstream file("object_vars_dump.txt");
-
-            for (const auto& [objIndex, vars] : result)
-            {
-                file << "{" << objIndex << " , {";
-
-                for (size_t i = 0; i < vars.size(); i++)
-                {
-                    file << "\"" << vars[i] << "\"";
-
-                    if (i < vars.size() - 1)
-                        file << ", ";
-                }
-
-                file << "}},\n";
-            }
-        }
-
 
         if (ImGui::CollapsingHeader("Variables"))
         {
@@ -459,6 +637,14 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 // DUMPING section
         if (ImGui::CollapsingHeader("Dumping"))
         {
+            if (ImGui::Button("Dump Objects"))
+            {
+                FetchInstanceVarsDumpFile(INSTANCE_ALL, true, true, "dump_objects.txt");
+            }
+            if (ImGui::Button("Dump Globals"))
+            {
+                FetchInstanceVarsDumpFile(INSTANCE_GLOBAL, false,true, "dump_globals.txt");
+            }
             if (ImGui::Button("Dump create events"))
             {
                 Misc::Print("Dumping to file!");
@@ -509,72 +695,21 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 g_recordCreateEvents = !g_recordCreateEvents;
                 Misc::Print("Recording create events: " + std::to_string(g_recordCreateEvents));
             }
+            if (ImGui::Button("Run command"))
+            {
+                g_showRunCmd = !g_showRunCmd;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Show FPS"))
+            {
+                g_showFpsPlot = !g_showFpsPlot;
+            }
         }
+
         
         ImGui::End();
 #pragma endregion
-        /*
-        if (g_showObjects)
-        {
-            ImGui::Begin("Object explorer");
-            // refresh instance enumeration
-            if (ImGui::Button("Refresh"))
-            {
-                g_InstanceIds.clear();
-
-                YYRValue allObjs, iid, varr, len, item;
-
-                CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
-                int count = (int)allObjs;
-
-                for (int objIndex = 0; objIndex < count; objIndex++)
-                {
-                    CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)objIndex });
-
-                    g_InstanceIds.push_back(int(iid));
-                }
-            }
-
-            //Variable display
-            ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
-            for (const auto& iid : g_InstanceIds)
-            {
-                std::string obj_name = LHObjects::GetObjectName((int)Binds::CallBuiltinA("variable_instance_get", { double(iid), "object_index" }));
-                std::string label = std::format("{}:{}", std::to_string(iid),obj_name);
-                
-                if (ImGui::CollapsingHeader(label.c_str()))
-                {
-                    if (ImGui::Button(("Refresh##" + std::to_string(iid)).c_str()))
-                    {
-                        Misc::Print(std::format("Getting vars for instance {}", iid));
-                        g_InstanceVarInfo[iid] = FetchInstanceVariables(iid);
-                    }
-
-                    if (bool(Binds::CallBuiltinA("instance_exists", { double(iid) })))
-                    {
-                        for (const auto& var : g_InstanceVarInfo[iid])
-                        {
-                            if (var.value != "<unknown>" || !g_filterShowParsedOnly)
-                            {
-
-                                ImGui::Text("%s (%s): %s",
-                                    var.name.c_str(),
-                                    var.type.c_str(),
-                                    var.value.c_str());
-                            }
-                        }
-                    }
-                    else
-                    {
-                        ImGui::TextColored({ 255,0,0,255 }, "Does not exist anymore");
-                    }
-                }
-            }
-
-            ImGui::EndChild();
-            ImGui::End();
-        }*/
-
+       
         if (g_showObjectsSafe)
         {
             ImGui::Begin("Safe Object explorer");
@@ -657,7 +792,8 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             if (ImGui::Button("Refresh"))
             {
                 g_GlobalVarInfo.clear();
-                g_GlobalVarInfo = FetchInstanceVariables(INSTANCE_GLOBAL);
+                bool _;
+                g_GlobalVarInfo = FetchInstanceVariablesSafe(INSTANCE_GLOBAL, _);
             }
 
             //Variable display
@@ -665,7 +801,11 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
           
             for (const auto& var : g_GlobalVarInfo)
             {
-                if (var.value != "<unknown>" || !g_filterShowParsedOnly)
+                if (var.value == "<unset>")
+                {
+                    ImGui::TextColored({ 255.0, 0., 0., 255.0 }, std::format("{} ({}): {}", var.name, var.type, var.value).c_str());
+                }
+                else if (var.value != "<unknown>" || !g_filterShowParsedOnly)
                 {
 
                     ImGui::Text("%s (%s): %s",
@@ -673,6 +813,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                         var.type.c_str(),
                         var.value.c_str());
                 }
+
             }
             
             ImGui::EndChild();
@@ -695,7 +836,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 }
             }
 
-            ImGui::Begin("Fps monitor");
+            ImGui::Begin("Fps Monitor");
             ImGui::PlotLines(
                 "FPS",
                 fpsHistory,
@@ -716,6 +857,47 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui::End();
         }
         
+        if (g_showRunCmd)
+        {
+            ImGui::Begin("Run Command");
+
+            ImGui::InputText("cmd", g_commandBuffer, sizeof(g_commandBuffer));
+
+            if (ImGui::Button("Run"))
+            {
+                std::string cmd = g_commandBuffer;
+
+                if (RunCommand(cmd))
+                {
+                    // Avoid duplicate of last command
+                    if (g_commandHistory.empty() || g_commandHistory.back() != cmd)
+                    {
+                        g_commandHistory.push_back(cmd);
+
+                        if (g_commandHistory.size() > MAXCMDHIST)
+                            g_commandHistory.pop_front();
+                    }
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::Text("History:");
+
+            for (int i = (int)g_commandHistory.size() - 1; i >= 0; --i)
+            {
+                const std::string& cmd = g_commandHistory[i];
+
+                if (ImGui::Button(cmd.c_str()))
+                {
+                    // Copy into input field
+                    strncpy(g_commandBuffer, cmd.c_str(), sizeof(g_commandBuffer));
+                    g_commandBuffer[sizeof(g_commandBuffer) - 1] = '\0'; // safety
+                }
+            }
+
+            ImGui::End();
+        }
+
         ImGui::Render();
         g_Context->OMSetRenderTargets(1, &g_RTV, NULL);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -747,6 +929,11 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
         }
     }
 
+    if (!Misc::StringHasSubstr(codeObj->i_pName, "Draw") && !Misc::StringHasSubstr(codeObj->i_pName, "Step"))
+    {
+        Misc::Print(codeObj->i_pName);
+    }
+    
 
     return YYTK_OK;
 }
@@ -762,6 +949,11 @@ void InstallPatches()
     }
 }
 
+YYTKStatus PluginUnload()
+{
+    LHCore::pUnregisterModule(gPluginName);
+    return YYTK_OK;
+}
 
 DllExport YYTKStatus PluginEntry(
     YYTKPlugin* PluginObject // A pointer to the dedicated plugin object
