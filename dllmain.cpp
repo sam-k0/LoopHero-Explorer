@@ -43,6 +43,7 @@ bool g_showDebugOverlay = false;
 bool g_showFpsPlot = true;
 bool g_showRunCmd = false;
 bool g_filterShowParsedOnly = true;
+bool g_logUncommonEvents = false;
 // other
 std::vector<int> g_InstanceIds;
 std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
@@ -50,6 +51,7 @@ std::vector<VarInfo> g_GlobalVarInfo;
 std::deque<std::string> g_commandHistory;
 
 char g_commandBuffer[512] = "";
+char g_globalVarNameFilter[256] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
@@ -256,7 +258,7 @@ std::vector<VarInfo> FetchInstanceVariablesSafe(double inst, bool &exists)
 
         if (!g_ObjectVarNames.contains((int)oid))
         {
-            Misc::Print(std::format("Instance id {} not found in map!", inst), CLR_RED);
+            Misc::Print(std::format("Instance id {} ({}) not found in map!", inst, oid), CLR_RED);
             exists = false;
             return result;
         }
@@ -614,19 +616,19 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_filterShowParsedOnly = !g_filterShowParsedOnly;
             }
-
+            /*
             if (ImGui::Button("Object explorer"))
             {
                 Misc::Print("Show object explorer");
                 g_showObjects = !g_showObjects;
             }
-            ImGui::SameLine();
+            ImGui::SameLine();*/
             if (ImGui::Button("Safe Object explorer"))
             {
                 Misc::Print("Show safe global explorer");
                 g_showObjectsSafe = !g_showObjectsSafe;
             }
-            if (ImGui::Button("Show global var explorer"))
+            if (ImGui::Button("Global Variable Explorer"))
             {
                 Misc::Print("Show global explorer");
                 g_showGlobals = !g_showGlobals;
@@ -679,30 +681,35 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 
         if (ImGui::CollapsingHeader("Other"))
         {
-            if (ImGui::Button("Hide native cursor"))
+            if (ImGui::Button("Hide Native Cursor"))
             {
                 ShowCursor(FALSE);
             }
             ImGui::SameLine();
-            if (ImGui::Button("Toggle debug overlay"))
+            if (ImGui::Button("Toggle Debug Overlay"))
             {
                 g_showDebugOverlay = !g_showDebugOverlay;
                 toggleDebug();
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Record create events"))
+            
+            if (ImGui::Button("Record Create Events"))
             {
                 g_recordCreateEvents = !g_recordCreateEvents;
                 Misc::Print("Recording create events: " + std::to_string(g_recordCreateEvents));
             }
-            if (ImGui::Button("Run command"))
+            if (ImGui::Button("Run Command"))
             {
                 g_showRunCmd = !g_showRunCmd;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Show FPS"))
+            if (ImGui::Button("Show Fps"))
             {
                 g_showFpsPlot = !g_showFpsPlot;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Log Events"))
+            {
+                g_logUncommonEvents = !g_logUncommonEvents;
             }
         }
 
@@ -794,6 +801,23 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 g_GlobalVarInfo.clear();
                 bool _;
                 g_GlobalVarInfo = FetchInstanceVariablesSafe(INSTANCE_GLOBAL, _);
+            }
+
+            ImGui::InputText("Filter", g_globalVarNameFilter, sizeof(g_globalVarNameFilter));
+            ImGui::SameLine();
+            if (ImGui::Button("Apply")) // apply filter by deleting unmatching entries from vector
+            {
+                std::string filter = g_globalVarNameFilter;
+                std::vector<VarInfo>::iterator it = g_GlobalVarInfo.begin();
+
+                while (it != g_GlobalVarInfo.end())
+                {
+                    if (!Misc::StringHasSubstr(it->name, filter))
+                    {
+                        it = g_GlobalVarInfo.erase(it);
+                    }
+                    else ++it;
+                }
             }
 
             //Variable display
@@ -929,9 +953,12 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
         }
     }
 
-    if (!Misc::StringHasSubstr(codeObj->i_pName, "Draw") && !Misc::StringHasSubstr(codeObj->i_pName, "Step"))
+    if (g_logUncommonEvents)
     {
-        Misc::Print(codeObj->i_pName);
+        if (!Misc::StringHasSubstr(codeObj->i_pName, "Draw") && !Misc::StringHasSubstr(codeObj->i_pName, "Step"))
+        {
+            Misc::Print(codeObj->i_pName);
+        }
     }
     
 
