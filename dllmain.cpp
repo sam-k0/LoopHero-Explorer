@@ -52,6 +52,7 @@ std::deque<std::string> g_commandHistory;
 
 char g_commandBuffer[512] = "";
 char g_globalVarNameFilter[256] = "";
+char g_globalVarValueFilter[256] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
@@ -802,24 +803,43 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 bool _;
                 g_GlobalVarInfo = FetchInstanceVariablesSafe(INSTANCE_GLOBAL, _);
             }
-
-            ImGui::InputText("Filter", g_globalVarNameFilter, sizeof(g_globalVarNameFilter));
-            ImGui::SameLine();
-            if (ImGui::Button("Apply")) // apply filter by deleting unmatching entries from vector
+            if (ImGui::CollapsingHeader("Filters"))
             {
-                std::string filter = g_globalVarNameFilter;
-                std::vector<VarInfo>::iterator it = g_GlobalVarInfo.begin();
-
-                while (it != g_GlobalVarInfo.end())
+                // Filter var name
+                ImGui::InputText("Filter Name", g_globalVarNameFilter, sizeof(g_globalVarNameFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("Apply##Name")) // apply filter by deleting unmatching entries from vector
                 {
-                    if (!Misc::StringHasSubstr(it->name, filter))
+                    std::string filter = g_globalVarNameFilter;
+                    std::vector<VarInfo>::iterator it = g_GlobalVarInfo.begin();
+
+                    while (it != g_GlobalVarInfo.end())
                     {
-                        it = g_GlobalVarInfo.erase(it);
+                        if (!Misc::StringHasSubstr(it->name, filter))
+                        {
+                            it = g_GlobalVarInfo.erase(it);
+                        }
+                        else ++it;
                     }
-                    else ++it;
+                }
+                // Filter val
+                ImGui::InputText("Filter Value", g_globalVarValueFilter, sizeof(g_globalVarValueFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("Apply##Value")) // apply filter by deleting unmatching entries from vector
+                {
+                    std::string filter = g_globalVarValueFilter;
+                    std::vector<VarInfo>::iterator it = g_GlobalVarInfo.begin();
+
+                    while (it != g_GlobalVarInfo.end())
+                    {
+                        if (!Misc::StringHasSubstr(it->value, filter))
+                        {
+                            it = g_GlobalVarInfo.erase(it);
+                        }
+                        else ++it;
+                    }
                 }
             }
-
             //Variable display
             ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
           
