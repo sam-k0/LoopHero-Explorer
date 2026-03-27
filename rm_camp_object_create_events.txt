@@ -1,4 +1,0 @@
-gml_Object_o_camp_resource_Create_0
-gml_Object_o_camp_game_button_Create_0
-gml_Object_o_camp_resource_main_Create_0
-gml_Object_o_camp_resource_Create_0
