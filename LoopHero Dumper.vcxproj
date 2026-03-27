@@ -24,6 +24,7 @@
     <ProjectGuid>{153d3fac-2c43-4551-8876-320a843feeb0}</ProjectGuid>
     <RootNamespace>LoopHero_Dumper</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>LoopHero Explorer</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -179,7 +180,7 @@
     <ClInclude Include="LHObjects.h" />
     <ClInclude Include="LHSprites.h" />
     <ClInclude Include="MyPlugin.h" />
-    <ClInclude Include="ObjectMaps.h" />
+    <ClInclude Include="VariableNames.h" />
     <ClInclude Include="SDK\Enums\Enums.hpp" />
     <ClInclude Include="SDK\FwdDecls\FwdDecls.hpp" />
     <ClInclude Include="SDK\Plugins\API Definitions\APIDefs.hpp" />
@@ -201,6 +202,7 @@
     <ClInclude Include="SDK\Structures\Undocumented\YYGMLFuncs\YYGMLFuncs.hpp" />
     <ClInclude Include="SDK\Structures\Undocumented\YYObjectBase\YYObjectBase.hpp" />
     <ClInclude Include="SDK\Structures\Undocumented\YYVAR\YYVAR.hpp" />
+    <ClInclude Include="Helpers.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="rm_camp_object_create_events.txt" />

@@ -16,7 +16,9 @@
 #include <regex>
 #include <deque>
 
-#include "ObjectMaps.h"
+#include "VariableNames.h"
+#include "Helpers.h"
+
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_dx11.h"
 #include "imgui/imgui_impl_win32.h"
@@ -44,6 +46,7 @@ bool g_showFpsPlot = true;
 bool g_showRunCmd = false;
 bool g_filterShowParsedOnly = true;
 bool g_logUncommonEvents = false;
+bool g_showNearestObject = false;
 // other
 std::vector<int> g_InstanceIds;
 std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
@@ -59,475 +62,6 @@ float fpsHistory[FPSBUFSIZE] = {};
 int fpsOffset = 0;
 
 #pragma region dumper functions
-
-void mapToFile(std::map<int, std::string> arg, std::string fname, std::string enumName)
-{
-    std::ofstream outFile(fname);
-
-    if (outFile.is_open()) {
-        outFile << "#pragma once\n\n";
-        outFile << "enum "<< enumName <<" {\n";
-
-        for (const auto& entry : arg) {
-            outFile << "    " << (entry.second) << " = " <<(entry.first) << ",\n";
-        }
-
-        outFile << "};\n";
-
-        outFile.close();
-        std::cout << fname <<" file generated successfully.\n";
-    }
-    else {
-        std::cerr << "Unable to open file for writing.\n";
-    }
-}
-
-void dumpObjectIDs()
-{
-    std::map<int, std::string> objMap;
-
-    while (true)
-    {
-        YYRValue doesExist = Binds::CallBuiltin("object_exists", nullptr, nullptr, { static_cast<double>(objMap.size()) });
-        Misc::Print(" Does exist: " + std::to_string(doesExist.As<double>()));
-        if (static_cast<double>(doesExist) == 0.0)
-        {
-            Misc::Print("Done!");
-            break;
-        }
-        YYRValue name = Binds::CallBuiltin("object_get_name", nullptr, nullptr, { static_cast<double>(objMap.size()) });
-        // cast to string
-        std::string namestr = static_cast<const char*>(name);
-        Misc::Print(namestr);
-        // add to map
-        objMap.insert(std::pair<int, std::string>(objMap.size(), namestr));
-    }
-
-    mapToFile(objMap, "objEnum.txt", "LHObjectEnum");
-}
-
-void dumpSpriteIDs()
-{
-    // sprite ID ; sprite name
-    std::map<int, std::string> spriteMap;
-    // Loop through all sprites
-    while(true)
-    {
-        YYRValue doesExist = Binds::CallBuiltin("sprite_exists", nullptr, nullptr, { static_cast<double>(spriteMap.size()) });
-        Misc::Print(" Does exist: " + std::to_string(doesExist.As<double>()));
-        if (static_cast<double>(doesExist) == 0.0)
-        {
-            Misc::Print("Done!");
-            break;
-        }
-        YYRValue spriteName = Binds::CallBuiltin("sprite_get_name", nullptr, nullptr, { static_cast<double>(spriteMap.size()) });
-        // cast to string
-        std::string spriteNameStr = static_cast<const char*>(spriteName);
-        Misc::Print(spriteNameStr);
-        // add to map
-        spriteMap.insert(std::pair<int, std::string>(spriteMap.size(), spriteNameStr));
-    }
-
-    Misc::Print("Map has " + std::to_string(spriteMap.size()));
-
-    std::ofstream outFile("SpriteEnum.txt");
-
-    if (outFile.is_open()) {
-        outFile << "#pragma once\n\n";
-        outFile << "enum SpriteEnum {\n";
-
-        for (const auto& entry : spriteMap) {
-            outFile << "    " << entry.second << " = " << entry.first << ",\n";
-        }
-
-        outFile << "};\n";
-
-        outFile.close();
-        std::cout << "SpriteEnum.txt file generated successfully.\n";
-    }
-    else {
-        std::cerr << "Unable to open file for writing.\n";
-    }
-
-}
-
-void toggleDebug()
-{
-    Binds::CallBuiltin("show_debug_overlay", nullptr, nullptr, {double(g_showDebugOverlay)});
-}
-
-void dumpVars()
-{
-    Misc::Print("Dumping shit:");
-    YYRValue vars;
-    //Misc::GetObjectInstanceVariables(vars, LHObjectEnum::o_camp_build_button);
-    //Misc::PrintArray(vars, Color::CLR_BRIGHTPURPLE);
-
-    YYRValue obj;
-    Misc::GetFirstOfObject(obj, LHObjectEnum::o_camp_build_button);
-    // show text
-    YYRValue text;
-    CallBuiltin(text, "variable_instance_get", nullptr, nullptr, { obj, "text" });
-
-    Misc::Print(static_cast<const char*>(text), Color::CLR_GOLD);
-
-    CallBuiltin(text, "variable_instance_set", nullptr, nullptr, { obj, "text", "ayo lmao" });
-}
-
-void printAllObjects()
-{
-    YYRValue allObjs;
-    YYRValue iid;
-    YYRValue arr;
-    CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
-    // ic = instance_count(all)
-    // instance_id_get(ic-1)
-    for (int i = 0; i < ((int)allObjs) - 1; i++)
-    {
-        CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)i });
-        Binds::GetInstanceVariables(arr, iid);
-        Misc::Print("______________");
-        Misc::PrintArray(arr);
-    }
-    
-}
-
-void getObjectAtMousePos()
-{
-    YYRValue mx = Binds::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
-    YYRValue my = Binds::CallBuiltin("device_mouse_y", nullptr, nullptr, { 0.0 });
-    
-    YYRValue obj = Binds::CallBuiltin("instance_nearest", nullptr, nullptr, {mx, my, INSTANCE_ALL });
-
-    YYRValue arr;
-    Binds::GetInstanceVariables(arr, obj);
-    Misc::Print("______________" + std::to_string((int)obj), Color::CLR_AQUA);
-    Misc::PrintArrayInstanceVariables(arr,obj);
-
-    YYRValue oi = Binds::CallBuiltinA("variable_instance_get", { obj, "object_index" });
-    Misc::Print(DCS(oi));
-
-}
-
-std::vector<VarInfo> FetchInstanceVariables(double inst)
-{
-    std::vector<VarInfo> result;
-
-    YYRValue varr = Binds::CallBuiltinA("variable_instance_get_names", { inst });    
-    Misc::Print(varr.As<double>());
-    YYRValue len = Binds::CallBuiltinA("array_length_1d", { varr });
-
-    int count = len.As<double>();
-
-    for (int i = 0; i < count; i++)
-    {
-        YYRValue item, content, type;
-
-        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
-        std::string varName = DCS(item);
-
-        CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName.c_str() });
-        CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-
-        std::string typeStr = DCS(type);
-        std::string valueStr;
-
-        if (typeStr == "number")
-            valueStr = std::to_string(double(content));
-        else if (typeStr == "bool")
-            valueStr = bool(content) ? "true" : "false";
-        else if (typeStr == "string")
-            valueStr = DCS(content);
-        else
-            valueStr = "<unknown>";
-
-        result.push_back({ varName, typeStr, valueStr });
-    }
-
-    return result; // fully safe snapshot
-}
-
-// exists will be false if not yet saved
-std::vector<VarInfo> FetchInstanceVariablesSafe(double inst, bool &exists)
-{
-    std::vector<VarInfo> result;
-    int oid = INSTANCE_GLOBAL; // global inst doesnt have object index, so use as default
-    // Try to find inst in map
-    if (inst != INSTANCE_GLOBAL)
-    {
-         oid = Binds::CallBuiltinA("variable_instance_get", { inst, "object_index" });
-
-        if (!g_ObjectVarNames.contains((int)oid))
-        {
-            Misc::Print(std::format("Instance id {} ({}) not found in map!", inst, oid), CLR_RED);
-            exists = false;
-            return result;
-        }
-    }
-    
-    exists = true;
-    for (const auto &it : g_ObjectVarNames.at((int)oid))
-    {
-        YYRValue item, content, type, isset;
-        
-        // Check if the variable exists already (may be inited later, would be violation)
-        if (inst != INSTANCE_GLOBAL)
-        {
-            CallBuiltin(isset, "variable_instance_exists", nullptr, nullptr, { inst, it });
-        }
-        else // use this for globals, other doesnt work for some reason
-        {
-            CallBuiltin(isset, "variable_global_exists", nullptr, nullptr, { it });
-        }
-        
-        if (bool(isset)) // exists
-        {
-            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst,it });
-            CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-
-            std::string typeStr = DCS(type);
-            std::string valueStr;
-
-            if (typeStr == "number")
-                valueStr = std::to_string(double(content));
-            else if (typeStr == "bool")
-                valueStr = bool(content) ? "true" : "false";
-            else if (typeStr == "string")
-                valueStr = DCS(content);
-            else
-                valueStr = "<unknown>";
-
-            result.push_back({ it, typeStr, valueStr });
-        }
-        else
-        {
-            result.push_back({ it, "<?type>", "<unset>" });
-        }
-
-       
-    }
-    return result;
-}
-
-void FetchInstanceVarsDumpFile(double index,bool isobject,bool dumpparsable, const char* filename)
-{
-
-    YYRValue allObjs, iid;
-    std::vector<int> outIDs;
-    if (isobject)
-    {
-        Misc::Print("Treating as object index, fetching all instances of type first...");
-        CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { index });
-        int count = (int)allObjs;
-
-        for (int i = 0; i < count; i++)
-        {
-            CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)i });
-            outIDs.push_back((int)iid);
-        }
-    }
-    else
-    {
-        Misc::Print("Treating as instance id, using index directly!");
-        outIDs.push_back(int(index));
-    }
-    // map onto vars
-    std::map<int, std::vector<std::string>> result;
-
-    for (int iid : outIDs)
-    {
-        YYRValue inst = (double)iid;
-
-        // get object_index
-        YYRValue objIndexVal;
-        CallBuiltin(objIndexVal, "variable_instance_get", nullptr, nullptr, { inst, "object_index" });
-        int objIndex = (int)objIndexVal;
-
-        // get variable names (unsafe array, so copy immediately!)
-        YYRValue varr, len, item;
-        Binds::GetInstanceVariables(varr, inst);
-
-        CallBuiltin(len, "array_length_1d", nullptr, nullptr, { varr });
-        int count = (int)len;
-
-        auto& vec = result[objIndex];
-
-        for (int i = 0; i < count; i++)
-        {
-            CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
-
-            std::string varName = DCS(item); // deep copy immediately
-
-            YYRValue type, content;
-            bool isok = true;
-            // check type 
-            if (dumpparsable)
-            {
-                CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName });
-                CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-
-                std::string typeStr = DCS(type);
-                std::string valueStr;
-
-                if (typeStr != "number" && typeStr != "string" && typeStr != "bool")
-                {
-                    isok = false;
-                    Misc::Print(std::format("Skipping {} as type is unknown.", varName));
-                }
-                    
-            }
-           
-            if (isok)
-            {
-                // avoid duplicates
-                if (std::find(vec.begin(), vec.end(), varName) == vec.end())
-                {
-                    vec.push_back(varName);
-                }
-            }
-        }
-    }
-    //write
-    std::ofstream file(filename);
-
-    for (const auto& [objIndex, vars] : result)
-    {
-        file << "{" << objIndex << " , {";
-
-        for (size_t i = 0; i < vars.size(); i++)
-        {
-            file << "\"" << vars[i] << "\"";
-
-            if (i < vars.size() - 1)
-                file << ", ";
-        }
-
-        file << "}},\n";
-    }
-}
-
-static std::vector<std::string> Tokenize(const std::string& ref)
-{
-    std::vector<std::string> vResults;
-    size_t _beginFuncCall = ref.find_first_of('(');
-
-    if (_beginFuncCall == std::string::npos)
-    {
-        return {};
-    }
-
-    size_t _endFuncCall = ref.find_first_of(')');
-
-    if (_endFuncCall == std::string::npos)
-    {
-        return {};
-    }
-
-    // Function name
-    vResults.push_back(ref.substr(0, _beginFuncCall));
-
-    std::stringstream ss(ref.substr(_beginFuncCall + 1, _endFuncCall - _beginFuncCall));
-    std::string sCurItem;
-
-    while (std::getline(ss, sCurItem, ','))
-    {
-        sCurItem.erase(std::remove_if(sCurItem.begin(), sCurItem.end(), ::isspace), sCurItem.end());
-        if (sCurItem.find_first_of(')') != std::string::npos)
-        {
-            auto closePos = sCurItem.find_first_of(')');
-
-            sCurItem = sCurItem.substr(0, closePos);
-        }
-
-        if (!sCurItem.empty())
-            vResults.push_back(sCurItem);
-    }
-
-    return vResults;
-}
-
-bool RunCommand(const std::string &cmd)
-{
-    if (cmd.empty())
-        return false;
-
-    std::string cmdcopy = cmd;
-
-    std::regex regexAssignment(R"(global\.([a-zA-Z_]+)\s*=\s*(.*))");
-    std::regex regexPeek(R"(global\.([a-zA-Z_]+))");
-
-    if (std::regex_match(cmdcopy, regexAssignment))
-    {
-        cmdcopy = std::regex_replace(cmdcopy, regexAssignment, "variable_global_set(\"$1\", $2)");
-    }
-    else if (std::regex_match(cmdcopy, regexPeek))
-    {
-        cmdcopy = std::regex_replace(cmdcopy, regexPeek, "variable_global_get(\"$1\")");
-    }
-
-    std::regex validCall(R"(^[a-zA-Z_]\w*\(.*\)$)");
-
-    if (!std::regex_match(cmdcopy, validCall))
-    {
-        Misc::Print("Invalid syntax");
-        return false;
-    }
-
-    std::vector<std::string> tokens = Tokenize(cmdcopy);
-    if (tokens.empty())
-        return false;
-
-    const std::string& funcName = tokens[0];
-
-    // --- Prepare args ---
-    std::vector<YYRValue> args(tokens.size() - 1);
-
-    for (size_t i = 1; i < tokens.size(); i++)
-    {
-        const std::string& token = tokens[i];
-
-        if (std::regex_match(token, std::regex(R"(^-?\d+(\.\d+)?$)")))
-        {
-            args[i - 1] = std::stod(token);
-        }
-        else if (std::regex_match(token, std::regex(R"REGEX("([^"]*)")REGEX")))
-        {
-            args[i - 1] = token.substr(1, token.size() - 2);
-        }
-        else if (token == "true")
-        {
-            args[i - 1] = true;
-        }
-        else if (token == "false")
-        {
-            args[i - 1] = false;
-        }
-        else
-        {
-            Misc::Print("Unknown token: " + token);
-            return false;
-        }
-    }
-
-    // --- Call builtin ---
-    YYRValue result;
-
-    if (!CallBuiltin(result, funcName.c_str(), nullptr, nullptr, args))
-    {
-        Misc::Print("Call failed: " + funcName);
-        return false;
-    }
-
-    // --- Print result ---
-    if (result.As<RValue>().Kind == VALUE_REAL)
-        Misc::Print(std::format("{}", result.As<double>()));
-    else if (result.As<RValue>().Kind == VALUE_STRING)
-        Misc::Print(result.As<std::string>());
-    else
-        Misc::Print("<unknown result>");
-
-    return true;
-}
 
 
 #pragma endregion
@@ -668,16 +202,6 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 Misc::Print("Dumping object names with ID");
                 dumpObjectIDs();
             }
-            if (ImGui::Button("Print all obj"))
-            {
-                Misc::Print("dumping var names");
-                printAllObjects();
-            }
-            if (ImGui::Button("Obj at cursor pos"))
-            {
-                Misc::Print("obj at pos");
-                getObjectAtMousePos();
-            }
         }
 
         if (ImGui::CollapsingHeader("Other"))
@@ -690,7 +214,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             if (ImGui::Button("Toggle Debug Overlay"))
             {
                 g_showDebugOverlay = !g_showDebugOverlay;
-                toggleDebug();
+                Binds::CallBuiltin("show_debug_overlay", nullptr, nullptr, { double(g_showDebugOverlay) });
             }
             
             if (ImGui::Button("Record Create Events"))
@@ -711,6 +235,10 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             if (ImGui::Button("Log Events"))
             {
                 g_logUncommonEvents = !g_logUncommonEvents;
+            }
+            if (ImGui::Button("Cursor Object Info"))
+            {
+                g_showNearestObject = !g_showNearestObject;
             }
         }
 
@@ -942,6 +470,23 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui::End();
         }
 
+        if (g_showNearestObject)
+        {
+            ImGui::Begin("Cursor object info");
+
+            YYRValue mx = Binds::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
+            YYRValue my = Binds::CallBuiltin("device_mouse_y", nullptr, nullptr, { 0.0 });
+            YYRValue obj = Binds::CallBuiltin("instance_nearest", nullptr, nullptr, { mx, my, INSTANCE_ALL });
+            YYRValue oi = Binds::CallBuiltinA("variable_instance_get", { obj, "object_index" });
+            
+            double objIndex = static_cast<double>(oi);
+            double instid = static_cast<double>(obj);
+            ImGui::Text("ObjectName: %s", LHObjects::GetObjectName(objIndex));
+            ImGui::Text("ObjectIndex: %d", objIndex);
+            ImGui::Text("InstanceID: %d", instid);
+            ImGui::End();
+        }
+
         ImGui::Render();
         g_Context->OMSetRenderTargets(1, &g_RTV, NULL);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -1009,7 +554,7 @@ DllExport YYTKStatus PluginEntry(
     LHCore::CoreReadyPack* pack = new LHCore::CoreReadyPack(PluginObject, InstallPatches);
     gThisPlugin = PluginObject;
     PluginObject->PluginUnload = PluginUnload;
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL); // Wait for LHCC
+    CloseHandle(CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL)); // Wait for LHCC
 
     PluginAttributes_t* pluginAttributes = nullptr;
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)

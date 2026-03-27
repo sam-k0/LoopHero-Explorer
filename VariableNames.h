@@ -53,8 +53,3 @@ std::map<int, std::vector < const char* >> g_ObjectVarNames = {
 {295 , {"callback", "click_event", "click_sound", "disabled", "hover", "is_active", "override_index", "owner", "pressed", "state_images", "toggle", "update_image"}},
 {298 , {"backind", "blink_speed", "blink_t", "card_index", "card_max", "card_min", "card_type", "cards_dup", "cards_nonexistent", "cards_type", "deck_sum", "deck_valid", "type_card_max", "type_card_min", "type_card_take"}},
 };
-
-// Map for global instance's possible varnames
-std::map<int, std::vector<const char*>> g_GlobalVarNames = {
-	
-};

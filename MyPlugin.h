@@ -17,7 +17,7 @@
 
 
 HINSTANCE DllHandle; // Self modhandle
-std::string gPluginName = "sam-k0.Dumper.yytk";
+std::string gPluginName = "sam-k0.LHExplorer.yytk";
 YYTKPlugin* gThisPlugin = nullptr;
 
 std::map<int, std::string> g_createEvents; // instance id to event
@@ -39,19 +39,11 @@ std::string DCS(YYRValue val)
     }
 }
 
-const RefDynamicArrayOfRValue* ResolveArray(YYRValue var)
-{
-    RValue gvrval = var.As<RValue>();
-    const RefDynamicArrayOfRValue* thisarr = reinterpret_cast<const RefDynamicArrayOfRValue*>(gvrval.RefArray);
-    return thisarr;
-}
-
 struct VarInfo {
     std::string name;
     std::string type;
     std::string value;
 };
-
 
 DllExport std::string GetPluginName() // For yytk
 {
@@ -70,8 +62,6 @@ constexpr uint32_t Hash(const char* str)
 }
 
 namespace Misc {
-
-    
 
     void Print(std::string s, Color c = CLR_DEFAULT)
     {
@@ -295,38 +285,4 @@ namespace Binds {
         CallBuiltin(var, name, nullptr, nullptr, args);
         return var;
     }
-
-    void PrintArrayInstanceVariables(YYRValue var, YYRValue inst, Color c = Color::CLR_DEFAULT)
-    {
-        YYRValue len;
-        YYRValue item;
-        YYRValue content;
-        YYRValue type;
-        CallBuiltin(len, "array_length_1d", nullptr, nullptr, { var });
-
-        for (int i = 0; i < (int)len; i++)
-        {
-            CallBuiltin(item, "array_get", nullptr, nullptr, { var, (double)i });
-            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, static_cast<const char*>(item) });
-            CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-            std::string typestr = std::string(static_cast<const char*>(type));
-            std::string message = std::string(static_cast<const char*>(item)) + " -> " + std::string(static_cast<const char*>(type));
-
-            if (typestr == "number")
-            {
-                message += " : " + std::to_string((int)content);
-            }
-            else if (typestr == "bool")
-            {
-                message += " : " + std::to_string(int((bool)content));
-            }
-            else if (typestr == "string")
-            {
-                message += " : " + std::string(static_cast<const char*>(content));
-            }
-
-            Misc::Print(message);
-        }
-    }
-
 }
