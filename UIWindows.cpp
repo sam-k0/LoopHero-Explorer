@@ -5,6 +5,7 @@
 #include "MyPlugin.h"
 #include "LHObjects.h"
 #include "imgui/imgui.h"
+#include "Assets.h"
 #include <format>
 
 // Static member initialization

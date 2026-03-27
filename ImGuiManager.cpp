@@ -15,7 +15,7 @@ LRESULT CALLBACK ImGuiWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
     // Get the original procedure from ImGuiManager
     ImGuiManager& mgr = ImGuiManager::Get();
-    return CallWindowProc(mgr.GetWindowHandle(), hWnd, uMsg, wParam, lParam);
+    return CallWindowProc(mgr.GetWndProc(), hWnd, uMsg, wParam, lParam);
 }
 
 bool ImGuiManager::Initialize(IDXGISwapChain* pSwapChain)

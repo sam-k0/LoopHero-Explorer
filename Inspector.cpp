@@ -1,8 +1,12 @@
 #include "Inspector.h"
 #include "LHObjects.h"
+#include "ObjectMaps.h"
 #include "MyPlugin.h"
+#include "Assets.h"
 #include <vector>
+#include <format>
 #include <algorithm>
+#include <string>
 
 std::vector<VarInfo> Inspector::FetchInstanceVariables(double instanceId)
 {
@@ -36,7 +40,7 @@ std::vector<VarInfo> Inspector::FetchInstanceVariables(double instanceId)
         else
             valueStr = "<unknown>";
 
-        result.push_back({ varName, typeStr, valueStr });
+        result.push_back(VarInfo(varName, typeStr, valueStr));
     }
 
     return result;

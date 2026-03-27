@@ -2,13 +2,8 @@
 
 #include <string>
 #include <vector>
-
+#include "VarInfo.h"
 // Information about a variable
-struct VarInfo {
-    std::string name;
-    std::string type;
-    std::string value;
-};
 
 class Inspector {
 public:

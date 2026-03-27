@@ -156,30 +156,41 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CommandExecutor.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="Dumper.cpp" />
+    <ClCompile Include="ImGuiManager.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_impl_dx11.cpp" />
     <ClCompile Include="imgui\imgui_impl_win32.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="Inspector.cpp" />
+    <ClCompile Include="PluginCore.cpp" />
     <ClCompile Include="SDK\Plugins\API Definitions\APIDefs.cpp" />
     <ClCompile Include="SDK\Plugins\Plugins.cpp" />
     <ClCompile Include="SDK\Structures\Documented\CDynamicArray\CDynamicArray.cpp" />
     <ClCompile Include="SDK\Structures\Documented\RefThing\RefThing.cpp" />
     <ClCompile Include="SDK\Structures\Documented\YYRValue\YYRValue.cpp" />
+    <ClCompile Include="UIWindows.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Assets.h" />
+    <ClInclude Include="CommandExecutor.h" />
+    <ClInclude Include="Dumper.h" />
     <ClInclude Include="Filesystem.h" />
+    <ClInclude Include="ImGuiManager.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
+    <ClInclude Include="Inspector.h" />
     <ClInclude Include="LHCore.h" />
     <ClInclude Include="LHObjects.h" />
     <ClInclude Include="LHSprites.h" />
     <ClInclude Include="MyPlugin.h" />
     <ClInclude Include="ObjectMaps.h" />
+    <ClInclude Include="PluginCore.h" />
     <ClInclude Include="SDK\Enums\Enums.hpp" />
     <ClInclude Include="SDK\FwdDecls\FwdDecls.hpp" />
     <ClInclude Include="SDK\Plugins\API Definitions\APIDefs.hpp" />
@@ -201,6 +212,8 @@
     <ClInclude Include="SDK\Structures\Undocumented\YYGMLFuncs\YYGMLFuncs.hpp" />
     <ClInclude Include="SDK\Structures\Undocumented\YYObjectBase\YYObjectBase.hpp" />
     <ClInclude Include="SDK\Structures\Undocumented\YYVAR\YYVAR.hpp" />
+    <ClInclude Include="UIWindows.h" />
+    <ClInclude Include="VarInfo.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="rm_camp_object_create_events.txt" />

@@ -10,11 +10,11 @@
 #include <iomanip>
 #include <map>
 // YYTK 
-#define YYSDK_PLUGIN // Declare the following code as a plugin
 //#define DEBUG // enables more prints
+#define YYSDK_PLUGIN 
 #include "SDK/SDK.hpp"
 #include "Filesystem.h"
-
+#include "VarInfo.h"
 
 HINSTANCE DllHandle; // Self modhandle
 std::string gPluginName = "sam-k0.Dumper.yytk";
@@ -45,12 +45,6 @@ const RefDynamicArrayOfRValue* ResolveArray(YYRValue var)
     const RefDynamicArrayOfRValue* thisarr = reinterpret_cast<const RefDynamicArrayOfRValue*>(gvrval.RefArray);
     return thisarr;
 }
-
-struct VarInfo {
-    std::string name;
-    std::string type;
-    std::string value;
-};
 
 
 DllExport std::string GetPluginName() // For yytk

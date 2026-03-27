@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <format>
 
 void Dumper::MapToFile(const std::map<int, std::string>& map, const std::string& filename, const std::string& enumName)
 {

@@ -3,6 +3,7 @@
 #include <regex>
 #include <sstream>
 #include <algorithm>
+#include <format>
 
 std::deque<std::string> CommandExecutor::m_commandHistory;
 const size_t CommandExecutor::MAX_HISTORY_SIZE = 5;

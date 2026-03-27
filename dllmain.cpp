@@ -1,6 +1,8 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include <Windows.h>
 #include "PluginCore.h"
+#include <SDK.hpp>
+#include "MyPlugin.h"
 
 #define _CRT_SECURE_NO_WARNINGS
 

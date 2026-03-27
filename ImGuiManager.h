@@ -27,12 +27,15 @@ public:
     ID3D11DeviceContext* GetContext() const { return m_pContext; }
     ID3D11RenderTargetView* GetRenderTargetView() const { return m_pRTV; }
     HWND GetWindowHandle() const { return m_hWnd; }
+    WNDPROC GetWndProc() const { return m_pOriginalWndProc; }
 
     // New frame setup (call at start of frame)
     void NewFrame();
 
     // Rendering (call at end of frame)
     void Render();
+
+    
 
 private:
     ImGuiManager() = default;
