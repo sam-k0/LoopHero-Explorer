@@ -47,15 +47,18 @@ bool g_showRunCmd = false;
 bool g_filterShowParsedOnly = true;
 bool g_logUncommonEvents = false;
 bool g_showNearestObject = false;
+bool g_doFilterEventLogging = false;
+bool g_showEventLogFilterDlg = false;
 // other
 std::vector<int> g_InstanceIds;
 std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
 std::vector<VarInfo> g_GlobalVarInfo;
 std::deque<std::string> g_commandHistory;
 
-char g_commandBuffer[512] = "";
+char g_commandBuffer[256] = "";
 char g_globalVarNameFilter[256] = "";
 char g_globalVarValueFilter[256] = "";
+char g_eventLogFilter[256] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
@@ -178,6 +181,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 FetchInstanceVarsDumpFile(INSTANCE_ALL, true, true, "dump_objects.txt");
             }
+            ImGui::SameLine();
             if (ImGui::Button("Dump Globals"))
             {
                 FetchInstanceVarsDumpFile(INSTANCE_GLOBAL, false,true, "dump_globals.txt");
@@ -187,6 +191,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 Misc::Print("Dumping to file!");
                 Misc::MapToFileA(&g_createEvents);
             }
+            ImGui::SameLine();
             if (ImGui::Button("Reset event storage"))
             {
                 Misc::Print("Resetting event vector");
@@ -197,10 +202,34 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 Misc::Print("Dumping sprite names with ID");
                 dumpSpriteIDs();
             }
+            
             if (ImGui::Button("Dump object names with ID"))
             {
                 Misc::Print("Dumping object names with ID");
                 dumpObjectIDs();
+            }
+
+            
+        }
+
+        if (ImGui::CollapsingHeader("Logging"))
+        {
+            if (ImGui::Button("Filter & Log Events"))
+            {
+                g_showEventLogFilterDlg = !g_showEventLogFilterDlg;
+            }
+            ImGui::SameLine();
+            ImGui::Text((g_showEventLogFilterDlg == true) ? "Shown" : "Hidden");
+
+            ImGui::Text("Logs events but Step & Draw");
+            ImGui::SameLine();
+            if (ImGui::Button("Log Events"))
+            {
+                g_logUncommonEvents = !g_logUncommonEvents;
+            }
+            if (ImGui::Button("Cursor Object Info"))
+            {
+                g_showNearestObject = !g_showNearestObject;
             }
         }
 
@@ -216,12 +245,17 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                 g_showDebugOverlay = !g_showDebugOverlay;
                 Binds::CallBuiltin("show_debug_overlay", nullptr, nullptr, { double(g_showDebugOverlay) });
             }
+            ImGui::SameLine();
+            ImGui::Text((g_showDebugOverlay == true) ? "On" : "Off");
             
             if (ImGui::Button("Record Create Events"))
             {
                 g_recordCreateEvents = !g_recordCreateEvents;
                 Misc::Print("Recording create events: " + std::to_string(g_recordCreateEvents));
             }
+            ImGui::SameLine();
+            ImGui::Text((g_recordCreateEvents == true) ? "On" : "Off");
+
             if (ImGui::Button("Run Command"))
             {
                 g_showRunCmd = !g_showRunCmd;
@@ -231,15 +265,8 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_showFpsPlot = !g_showFpsPlot;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Log Events"))
-            {
-                g_logUncommonEvents = !g_logUncommonEvents;
-            }
-            if (ImGui::Button("Cursor Object Info"))
-            {
-                g_showNearestObject = !g_showNearestObject;
-            }
+            
+           
         }
 
         
@@ -472,7 +499,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 
         if (g_showNearestObject)
         {
-            ImGui::Begin("Cursor object info");
+            ImGui::Begin("Cursor Object Info");
 
             YYRValue mx = Binds::CallBuiltin("device_mouse_x", nullptr, nullptr, { 0.0 });
             YYRValue my = Binds::CallBuiltin("device_mouse_y", nullptr, nullptr, { 0.0 });
@@ -485,6 +512,23 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui::Text("ObjectIndex: %d", objIndex);
             ImGui::Text("InstanceID: %d", instid);
             ImGui::End();
+        }
+
+        if (g_showEventLogFilterDlg)
+        {
+            ImGui::Begin("Log Filtered Events");
+
+            if (ImGui::Button("Toggle Logging"))
+            {
+                g_doFilterEventLogging = !g_doFilterEventLogging;
+            }
+            ImGui::SameLine();
+            ImGui::Text((g_doFilterEventLogging == true) ? "On" : "Off");
+
+            ImGui::InputText("Filter", g_eventLogFilter, sizeof(g_eventLogFilter));
+
+            ImGui::End();
+
         }
 
         ImGui::Render();
@@ -525,6 +569,14 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
             Misc::Print(codeObj->i_pName);
         }
     }
+
+    if (g_doFilterEventLogging)
+    {
+        if (Misc::StringHasSubstr(codeObj->i_pName, std::string(g_eventLogFilter)))
+        {
+            Misc::Print(std::format("Filtered Evt: {}", codeObj->i_pName));
+        }
+    }
     
 
     return YYTK_OK;
@@ -554,7 +606,8 @@ DllExport YYTKStatus PluginEntry(
     LHCore::CoreReadyPack* pack = new LHCore::CoreReadyPack(PluginObject, InstallPatches);
     gThisPlugin = PluginObject;
     PluginObject->PluginUnload = PluginUnload;
-    CloseHandle(CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL)); // Wait for LHCC
+    HANDLE t = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL);
+    CloseHandle(t); // Wait for LHCC
 
     PluginAttributes_t* pluginAttributes = nullptr;
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)
