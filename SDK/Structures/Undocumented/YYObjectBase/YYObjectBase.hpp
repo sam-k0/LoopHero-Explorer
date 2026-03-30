@@ -62,6 +62,8 @@ struct CInstance : YYObjectBase
 	void* m_pPhysicsObject;
 	void* m_pSkeletonAnimation;
 	void* m_pControllingSeqInst;
+	void* m_pUnknown1;
+	void* m_pUnknown2;
 	unsigned int m_Instflags;
 	int i_id;
 	int i_objectindex;
