@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <optional>
 // YYTK 
 #define YYSDK_PLUGIN // Declare the following code as a plugin
 //#define DEBUG // enables more prints
@@ -39,11 +40,21 @@ std::string DCS(YYRValue val)
     }
 }
 
+// Stores info about a variable
 struct VarInfo {
     std::string name;
     std::string type;
     std::string value;
 };
+
+// same for a whole instance
+struct InstanceInfo {
+    std::string name;
+    int objectindex;
+    int instanceid;
+    std::optional<std::vector<VarInfo>> variables;
+};
+
 
 DllExport std::string GetPluginName() // For yytk
 {

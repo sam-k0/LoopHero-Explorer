@@ -37,8 +37,7 @@ ID3D11RenderTargetView* g_RTV = nullptr;
 WNDPROC g_OriginalWndProc = nullptr;
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 // imgui states
-bool g_showObjects = false;
-bool g_showObjectsSafe = false;
+bool g_showObjectExplorer = false;
 bool g_recordCreateEvents = true;
 bool g_showGlobals = false;
 bool g_showDebugOverlay = false;
@@ -50,24 +49,25 @@ bool g_showNearestObject = false;
 bool g_doFilterEventLogging = false;
 bool g_showEventLogFilterDlg = false;
 // other
-std::vector<int> g_InstanceIds;
-std::map<int, std::vector<VarInfo>> g_InstanceVarInfo;
+std::map<int,InstanceInfo> g_InstanceInfos;
 std::vector<VarInfo> g_GlobalVarInfo;
 std::deque<std::string> g_commandHistory;
-
+// Run command
 char g_commandBuffer[256] = "";
-char g_globalVarNameFilter[256] = "";
+// Filtering global vars
+char g_globalVarNameFilter[256] = ""; 
 char g_globalVarValueFilter[256] = "";
+// Filtering instance and instance vars
+char g_instanceNameFilter[256] = "";
+char g_instanceVarNameFilter[256] = "";
+char g_instanceVarValueFilter[256] = "";
+// Event filter
 char g_eventLogFilter[256] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
 int fpsOffset = 0;
 
-#pragma region dumper functions
-
-
-#pragma endregion
 
 // Custom WndProc to forward messages to ImGui
 LRESULT CALLBACK MyWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -154,17 +154,11 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_filterShowParsedOnly = !g_filterShowParsedOnly;
             }
-            /*
+            ImGui::SameLine();
             if (ImGui::Button("Object explorer"))
             {
                 Misc::Print("Show object explorer");
-                g_showObjects = !g_showObjects;
-            }
-            ImGui::SameLine();*/
-            if (ImGui::Button("Safe Object explorer"))
-            {
-                Misc::Print("Show safe global explorer");
-                g_showObjectsSafe = !g_showObjectsSafe;
+                g_showObjectExplorer = !g_showObjectExplorer;
             }
             if (ImGui::Button("Global Variable Explorer"))
             {
@@ -227,19 +221,11 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_logUncommonEvents = !g_logUncommonEvents;
             }
-            if (ImGui::Button("Cursor Object Info"))
-            {
-                g_showNearestObject = !g_showNearestObject;
-            }
+           
         }
 
         if (ImGui::CollapsingHeader("Other"))
-        {
-            if (ImGui::Button("Hide Native Cursor"))
-            {
-                ShowCursor(FALSE);
-            }
-            ImGui::SameLine();
+        {   
             if (ImGui::Button("Toggle Debug Overlay"))
             {
                 g_showDebugOverlay = !g_showDebugOverlay;
@@ -265,6 +251,14 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_showFpsPlot = !g_showFpsPlot;
             }
+            if (ImGui::Button("Cursor Object Info"))
+            {
+                g_showNearestObject = !g_showNearestObject;
+            }
+            if (ImGui::Button("Hide Native Cursor"))
+            {
+                ShowCursor(FALSE);
+            }
             
            
         }
@@ -273,62 +267,185 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
         ImGui::End();
 #pragma endregion
        
-        if (g_showObjectsSafe)
+        if (g_showObjectExplorer)
         {
-            ImGui::Begin("Safe Object explorer");
+            ImGui::Begin("Object explorer");
             // refresh instance enumeration
             if (ImGui::Button("Refresh"))
             {
-                g_InstanceIds.clear();
+                g_InstanceInfos.clear();
 
-                YYRValue allObjs, iid, varr, len, item;
+                YYRValue allObjs, i_id;
 
                 CallBuiltin(allObjs, "instance_number", nullptr, nullptr, { INSTANCE_ALL });
                 int count = (int)allObjs;
-
-                for (int objIndex = 0; objIndex < count; objIndex++)
+                // Loop vars
+                int obj_index; // Object Index per inst
+                std::string obj_name; // Object name per inst
+                // Fetch all instance info except variables
+                for (int inst_iter = 0; inst_iter < count; inst_iter++)
                 {
-                    CallBuiltin(iid, "instance_id_get", nullptr, nullptr, { (double)objIndex });
+                    CallBuiltin(i_id, "instance_id_get", nullptr, nullptr, { (double)inst_iter });
+                    
+                    obj_index = (int)Binds::CallBuiltinA("variable_instance_get", { double(i_id), "object_index" });
+                    obj_name = LHObjects::GetObjectName(obj_index);
 
-                    g_InstanceIds.push_back(int(iid));
+                    InstanceInfo i_info = InstanceInfo();
+                    i_info.instanceid = i_id;
+                    i_info.name = obj_name;
+                    i_info.objectindex = obj_index;
+                    i_info.variables = std::nullopt;
+
+                    g_InstanceInfos.insert(std::make_pair(i_id, i_info));
                 }
             }
+            // Filtering
+            if (ImGui::CollapsingHeader("Filters"))
+            {
+                // Filter var name
+                ImGui::InputText("Filter Instance", g_instanceNameFilter, sizeof(g_instanceNameFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("Apply##Instance")) // apply filter by deleting unmatching entries from vector
+                {
+                    std::string filter = g_instanceNameFilter;
+                    for (auto it = g_InstanceInfos.begin(); it != g_InstanceInfos.end();)
+                    {
+                        if (!Misc::StringHasSubstr(it->second.name, filter))
+                        {
+                            it = g_InstanceInfos.erase(it); // returns next iterator
+                        }
+                        else
+                        {
+                            ++it;
+                        }
+                    }
+                }
+                // Filter variable names
+                ImGui::InputText("Filter Variable", g_instanceVarNameFilter, sizeof(g_instanceVarNameFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("Apply##Variable")) // apply filter by deleting unmatching entries from vector
+                {
+                    //Load all variables for all instances that arent loaded yet
+                    std::string filter = g_instanceVarNameFilter;
+                    for (auto it = g_InstanceInfos.begin(); it != g_InstanceInfos.end(); )
+                    {
+                        bool exists = true;
+                        auto& info = it->second;
 
+                        if (!info.variables) // refetch if none
+                        {
+                            info.variables = FetchInstanceVariablesSafe(it->first, exists);
+                        }
+                       
+                        // If instance doesnt exist anymore, continue
+                        if (!exists)
+                        {
+                            it = g_InstanceInfos.erase(it);
+                            continue;
+                        }
+
+                        // If it exists, filter variables by filter
+                        if (auto& vars = info.variables)
+                        {
+                            vars->erase(
+                                std::remove_if(vars->begin(), vars->end(),
+                                    [&](const VarInfo& var)
+                                    {
+                                        return !Misc::StringHasSubstr(var.name, filter);
+                                    }),
+                                vars->end()
+                            );
+                        }
+
+                        ++it; // Increase the it for instance infos
+                    }
+                }
+
+                // Filter variable values
+                ImGui::InputText("Filter Value", g_instanceVarValueFilter, sizeof(g_instanceVarValueFilter));
+                ImGui::SameLine();
+                if (ImGui::Button("Apply##Value")) // apply filter by deleting unmatching entries from vector
+                {
+                    //Load all variables for all instances that arent loaded yet
+                    std::string filter = g_instanceVarValueFilter;
+                    for (auto it = g_InstanceInfos.begin(); it != g_InstanceInfos.end(); )
+                    {
+                        bool exists = true;
+                        auto& info = it->second;
+
+                        if (!info.variables) // refetch if none
+                        {
+                            info.variables = FetchInstanceVariablesSafe(it->first, exists);
+                        }
+
+                        // If instance doesnt exist anymore, continue
+                        if (!exists)
+                        {
+                            it = g_InstanceInfos.erase(it);
+                            continue;
+                        }
+
+                        // If it exists, filter variables by filter
+                        if (auto& vars = info.variables)
+                        {
+                            vars->erase(
+                                std::remove_if(vars->begin(), vars->end(),
+                                    [&](const VarInfo& var)
+                                    {
+                                        return !Misc::StringHasSubstr(var.value, filter);
+                                    }),
+                                vars->end()
+                            );
+                        }
+
+                        ++it; // Increase the it for instance infos
+                    }
+                }
+            }
+            
             //Variable display
             ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
-            for (const auto& iid : g_InstanceIds)
+            for (auto& instance_info : g_InstanceInfos)
             {
-                int objid = (int)Binds::CallBuiltinA("variable_instance_get", { double(iid), "object_index" });
-                std::string obj_name = LHObjects::GetObjectName(objid);
-                std::string label = std::format("{}:{}({})", std::to_string(iid), obj_name,objid);
+                std::string label = std::format("{}:{}({})",
+                    std::to_string(instance_info.second.instanceid),
+                    instance_info.second.name,
+                    std::to_string(instance_info.second.objectindex));
 
                 if (ImGui::CollapsingHeader(label.c_str()))
                 {
                     bool exists = true;
-                    if (ImGui::Button(("Refresh##" + std::to_string(iid)).c_str()))
+                    if (ImGui::Button(("Refresh##" + std::to_string(instance_info.second.instanceid)).c_str()))
                     {
-                        Misc::Print(std::format("Getting vars for instance {}", iid));
-                        g_InstanceVarInfo[iid] = FetchInstanceVariablesSafe(iid, exists);
+                        Misc::Print(std::format("Getting vars for instance {}", instance_info.second.instanceid));
+                        instance_info.second.variables = FetchInstanceVariablesSafe(instance_info.first, exists);
                     }
                     if (exists)
                     {
-                        if (bool(Binds::CallBuiltinA("instance_exists", { double(iid) })))
+                        if (bool(Binds::CallBuiltinA("instance_exists", { double(instance_info.first) })))
                         {
-                            for (const auto& var : g_InstanceVarInfo[iid])
+                            if (auto& vars = instance_info.second.variables)
                             {
-                                if (var.value != "<unknown>" || !g_filterShowParsedOnly)
+                                for (const auto& var : *vars)
                                 {
-                                    ImVec4 col = ImVec4(255, 255, 255, 255);//white default
-                                    if (var.type != "number" && var.type != "string" && var.type != "bool")
+                                    if (var.value != "<unknown>" || !g_filterShowParsedOnly)
                                     {
-                                        col = ImVec4(255, 0, 0, 255); // red on unparsable
+                                        ImVec4 col = ImVec4(255, 255, 255, 255);//white default
+                                        if (var.type != "number" && var.type != "string" && var.type != "bool")
+                                        {
+                                            col = ImVec4(255, 0, 0, 255); // red on unparsable
+                                        }
+
+                                        ImGui::TextColored(col, "%s (%s): %s",
+                                            var.name.c_str(),
+                                            var.type.c_str(),
+                                            var.value.c_str());
                                     }
-                                    
-                                    ImGui::TextColored(col,"%s (%s): %s",
-                                        var.name.c_str(),
-                                        var.type.c_str(),
-                                        var.value.c_str());
                                 }
+                            }
+                            else
+                            {
+                                ImGui::TextColored({ 255,0,0,255 }, "Variable container is empty");
                             }
                         }
                         else
@@ -545,7 +662,8 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
     CCode* codeObj = std::get<CCode*>(codeEvent->Arguments());
     CInstance* selfInst = std::get<0>(codeEvent->Arguments());
     CInstance* otherInst = std::get<1>(codeEvent->Arguments());
-
+    CCode* code = std::get<2>(codeEvent->Arguments());
+   
     // If we have invalid data???
     if (!codeObj)
         return YYTK_INVALIDARG;
@@ -558,7 +676,7 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
     {
         if (Misc::StringHasSubstr(codeObj->i_pName, "Create") && Misc::StringHasSubstr(codeObj->i_pName, "gml_Object"))
         {
-            g_createEvents.insert(std::make_pair(selfInst->i_spriteindex, codeObj->i_pName));
+            g_createEvents.insert(std::make_pair(selfInst->i_id, codeObj->i_pName));
         }
     }
 
@@ -566,7 +684,7 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
     {
         if (!Misc::StringHasSubstr(codeObj->i_pName, "Draw") && !Misc::StringHasSubstr(codeObj->i_pName, "Step"))
         {
-            Misc::Print(codeObj->i_pName);
+            Misc::Print(std::format("{} / {} ({})", codeObj->i_pName, code->GetText(), code->i_CodeIndex));
         }
     }
 
@@ -577,7 +695,71 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
             Misc::Print(std::format("Filtered Evt: {}", codeObj->i_pName));
         }
     }
-    
+
+    /*if (strcmp(codeObj->i_pName, "gml_Object_o_camp_statistik_Create_0") == 0)
+    {
+        CInstance* pInstance = (CInstance*)selfInst;
+        Misc::Print(std::format("m_CreateCounter: {}", pInstance->m_CreateCounter));
+        Misc::Print(std::format("m_Instflags: {}", pInstance->m_Instflags));
+        Misc::Print(std::format("Unknown1: {}", pInstance->m_pUnknown1));
+        Misc::Print(std::format("Unknown2: {}", pInstance->m_pUnknown2));
+        Misc::Print(std::format("i_id: {}", pInstance->i_id));
+        Misc::Print(std::format("i_objectindex: {}", pInstance->i_objectindex));
+        Misc::Print(std::format("i_spriteindex: {}", pInstance->i_spriteindex));
+
+        Misc::Print(std::format("i_sequencePos: {}", pInstance->i_sequencePos));
+        Misc::Print(std::format("i_lastSequencePos: {}", pInstance->i_lastSequencePos));
+        Misc::Print(std::format("i_sequenceDir: {}", pInstance->i_sequenceDir));
+
+        Misc::Print(std::format("i_imageindex: {}", pInstance->i_imageindex));
+        Misc::Print(std::format("i_imagespeed: {}", pInstance->i_imagespeed));
+        Misc::Print(std::format("i_imagescalex: {}", pInstance->i_imagescalex));
+        Misc::Print(std::format("i_imagescaley: {}", pInstance->i_imagescaley));
+        Misc::Print(std::format("i_imageangle: {}", pInstance->i_imageangle));
+        Misc::Print(std::format("i_imagealpha: {}", pInstance->i_imagealpha));
+        Misc::Print(std::format("i_imageblend: {}", pInstance->i_imageblend));
+
+        Misc::Print(std::format("i_x: {}", pInstance->i_x));
+        Misc::Print(std::format("i_y: {}", pInstance->i_y));
+        Misc::Print(std::format("i_xstart: {}", pInstance->i_xstart));
+        Misc::Print(std::format("i_ystart: {}", pInstance->i_ystart));
+        Misc::Print(std::format("i_xprevious: {}", pInstance->i_xprevious));
+        Misc::Print(std::format("i_yprevious: {}", pInstance->i_yprevious));
+
+        Misc::Print(std::format("i_direction: {}", pInstance->i_direction));
+        Misc::Print(std::format("i_speed: {}", pInstance->i_speed));
+        Misc::Print(std::format("i_friction: {}", pInstance->i_friction));
+        Misc::Print(std::format("i_gravitydir: {}", pInstance->i_gravitydir));
+        Misc::Print(std::format("i_gravity: {}", pInstance->i_gravity));
+        Misc::Print(std::format("i_hspeed: {}", pInstance->i_hspeed));
+        Misc::Print(std::format("i_vspeed: {}", pInstance->i_vspeed));
+
+        Misc::Print(std::format(
+            "i_bbox: [{}, {}, {}, {}]",
+            pInstance->i_bbox[0],
+            pInstance->i_bbox[1],
+            pInstance->i_bbox[2],
+            pInstance->i_bbox[3]
+        ));
+
+        Misc::Print(std::format(
+            "i_timer: [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}]",
+            pInstance->i_timer[0], pInstance->i_timer[1], pInstance->i_timer[2],
+            pInstance->i_timer[3], pInstance->i_timer[4], pInstance->i_timer[5],
+            pInstance->i_timer[6], pInstance->i_timer[7], pInstance->i_timer[8],
+            pInstance->i_timer[9], pInstance->i_timer[10], pInstance->i_timer[11]
+        ));
+
+        Misc::Print(std::format("m_nLayerID: {}", pInstance->m_nLayerID));
+        Misc::Print(std::format("i_maskindex: {}", pInstance->i_maskindex));
+        Misc::Print(std::format("m_nMouseOver: {}", pInstance->m_nMouseOver));
+
+        Misc::Print(std::format("i_depth: {}", pInstance->i_depth));
+        Misc::Print(std::format("i_currentdepth: {}", pInstance->i_currentdepth));
+        Misc::Print(std::format("i_lastImageNumber: {}", pInstance->i_lastImageNumber));
+
+        Misc::Print(std::format("m_collisionTestNumber: {}", pInstance->m_collisionTestNumber));
+    }*/
 
     return YYTK_OK;
 }
@@ -606,8 +788,8 @@ DllExport YYTKStatus PluginEntry(
     LHCore::CoreReadyPack* pack = new LHCore::CoreReadyPack(PluginObject, InstallPatches);
     gThisPlugin = PluginObject;
     PluginObject->PluginUnload = PluginUnload;
-    HANDLE t = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL);
-    CloseHandle(t); // Wait for LHCC
+    HANDLE t = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)LHCore::ResolveCore, (LPVOID)pack, 0, NULL);// Wait for LHCC
+    if (t != 0)CloseHandle(t); 
 
     PluginAttributes_t* pluginAttributes = nullptr;
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)
