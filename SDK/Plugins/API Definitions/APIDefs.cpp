@@ -118,14 +118,14 @@ void PrintMessage(Color color, const char* fmt, ...)
 	char Buf[MaxStringLength];
 	memset(Buf, 0, MaxStringLength);
 	strncpy(Buf, fmt, MaxStringLength);
-	vsprintf_s(Buf, fmt, vaArgs);
+	_vsnprintf_s(Buf, MaxStringLength, _TRUNCATE, fmt, vaArgs);
 	va_end(vaArgs);
 
 	HMODULE YYTKModule = GetYYTKModule();
 
 	decltype(&PrintMessage) Func = reinterpret_cast<decltype(&PrintMessage)>(GetProcAddress(YYTKModule, __FUNCTION__));
 
-	return Func(color, Buf);
+	return Func(color, "%s", Buf); // The core formats again, Buf may contain '%'.
 }
 
 void PrintError(const char* File, const int& Line, const char* fmt, ...)
@@ -141,14 +141,14 @@ void PrintError(const char* File, const int& Line, const char* fmt, ...)
 	char Buf[MaxStringLength];
 	memset(Buf, 0, MaxStringLength);
 	strncpy(Buf, fmt, MaxStringLength);
-	vsprintf_s(Buf, fmt, vaArgs);
+	_vsnprintf_s(Buf, MaxStringLength, _TRUNCATE, fmt, vaArgs);
 	va_end(vaArgs);
 
 	HMODULE YYTKModule = GetYYTKModule();
 
 	decltype(&PrintError) Func = reinterpret_cast<decltype(&PrintError)>(GetProcAddress(YYTKModule, __FUNCTION__));
 
-	return Func(File, Line, Buf);
+	return Func(File, Line, "%s", Buf);
 }
 
 void PrintMessageNoNewline(Color color, const char* fmt, ...)
@@ -164,14 +164,14 @@ void PrintMessageNoNewline(Color color, const char* fmt, ...)
 	char Buf[MaxStringLength];
 	memset(Buf, 0, MaxStringLength);
 	strncpy(Buf, fmt, MaxStringLength);
-	vsprintf_s(Buf, fmt, vaArgs);
+	_vsnprintf_s(Buf, MaxStringLength, _TRUNCATE, fmt, vaArgs);
 	va_end(vaArgs);
 
 	HMODULE YYTKModule = GetYYTKModule();
 
 	decltype(&PrintMessageNoNewline) Func = reinterpret_cast<decltype(&PrintMessageNoNewline)>(GetProcAddress(YYTKModule, __FUNCTION__));
 
-	return Func(color, Buf);
+	return Func(color, "%s", Buf); // The core formats again, Buf may contain '%'.
 }
 
 YYTKStatus PmGetPluginAttributes(YYTKPlugin* pObject, PluginAttributes_t*& outAttributes)

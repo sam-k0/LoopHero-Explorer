@@ -61,7 +61,15 @@ struct YYRValue : protected RValue
 	// Copy constructor
 	YYRValue(const YYRValue& Value) noexcept(true);
 
+	YYRValue(YYRValue&& Value) noexcept(true);
+
 	YYRValue(const RValue& Value) noexcept(true);
+
+	YYRValue& operator=(const YYRValue& Value) noexcept(true);
+
+	YYRValue& operator=(YYRValue&& Value) noexcept(true);
+
+	~YYRValue() noexcept(true);
 
 	// static_cast<int>(V);	
 	operator int() const noexcept(true);
