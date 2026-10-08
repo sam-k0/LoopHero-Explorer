@@ -104,7 +104,7 @@ void dumpObjectIDs()
         }
         YYRValue name = Binds::CallBuiltin("object_get_name", nullptr, nullptr, { static_cast<double>(objMap.size()) });
         // cast to string
-        std::string namestr = static_cast<const char*>(name);
+        std::string namestr = name.operator std::string();
         Misc::Print(namestr);
         // add to map
         objMap.insert(std::pair<int, std::string>(objMap.size(), namestr));
@@ -129,7 +129,7 @@ void dumpSpriteIDs()
         }
         YYRValue spriteName = Binds::CallBuiltin("sprite_get_name", nullptr, nullptr, { static_cast<double>(spriteMap.size()) });
         // cast to string
-        std::string spriteNameStr = static_cast<const char*>(spriteName);
+        std::string spriteNameStr = spriteName.operator std::string();
         Misc::Print(spriteNameStr);
         // add to map
         spriteMap.insert(std::pair<int, std::string>(spriteMap.size(), spriteNameStr));

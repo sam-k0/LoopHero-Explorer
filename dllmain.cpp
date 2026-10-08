@@ -760,7 +760,7 @@ int ExecuteCodeCallback(YYTKCodeEvent* codeEvent, void*)
             "sizeDownloaded"
         };
 
-		YYRValue asyncLoadMap = Binds::CallBuiltinA("variable_instance_get", { selfInst, "async_load" });
+		YYRValue asyncLoadMap = Binds::CallBuiltinA("variable_instance_get", { (double)selfInst->i_id, "async_load" });
 
 		for (const char* key : keys)
         {
