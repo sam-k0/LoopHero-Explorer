@@ -76,22 +76,22 @@ namespace Misc {
 
     void Print(std::string s, Color c = CLR_DEFAULT)
     {
-        PrintMessage(c, (gPluginName + ": " + s).c_str());
+        PrintMessage(c, "%s", (gPluginName + ": " + s).c_str());
     }
 
     void Print(int i, Color c = CLR_DEFAULT)
     {
-        PrintMessage(c, (gPluginName + ": " + std::to_string(i)).c_str());
+        PrintMessage(c, "%s", (gPluginName + ": " + std::to_string(i)).c_str());
     }
 
     void Print(const char* s, Color c = CLR_DEFAULT)
     {
-        PrintMessage(c, (gPluginName + ": " + std::string(s)).c_str());
+        PrintMessage(c, "%s", (gPluginName + ": " + std::string(s)).c_str());
     }
 
     void PrintDbg(std::string s, std::string func, int line, Color c)
     {
-        PrintMessage(c, (gPluginName + ": " + s + " (" + func + ":" + std::to_string(line) + ")").c_str());
+        PrintMessage(c, "%s", (gPluginName + ": " + s + " (" + func + ":" + std::to_string(line) + ")").c_str());
     }
 
     void PrintArrayInstanceVariables(YYRValue var, YYRValue inst)
@@ -249,7 +249,7 @@ namespace Misc {
         for (int i = 0; i < (int)len; i++)
         {
             CallBuiltin(item, "array_get", nullptr, nullptr, { var, (double)i });
-            Misc::Print(static_cast<const char*>(item), c);
+            Misc::Print(item.operator std::string(), c);
         }
     }
 
