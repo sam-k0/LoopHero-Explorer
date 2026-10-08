@@ -30,6 +30,7 @@
 #define MAXCMDHIST 5
 
 CallbackAttributes_t* frameCallbackAttr;
+CallbackAttributes_t* resizeCallbackAttr;
 // imgui
 bool g_ImGuiInitialized = false;
 ID3D11Device* g_Device = nullptr;
@@ -93,6 +94,29 @@ LRESULT CALLBACK MyWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return CallWindowProc(g_OriginalWndProc, hWnd, uMsg, wParam, lParam);
 }
 
+void CreateRenderTarget(IDXGISwapChain* pSwapChain)
+{
+    ID3D11Texture2D* pBackBuffer = nullptr;
+    if (SUCCEEDED(pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer)))
+    {
+        g_Device->CreateRenderTargetView(pBackBuffer, NULL, &g_RTV);
+        pBackBuffer->Release();
+    }
+}
+
+// ResizeBuffers fails while anyone still references the back buffer, so drop ours before the core resizes.
+// It gets recreated on the next Present.
+YYTKStatus ResizeBuffersCallback(YYTKEventBase* pEvent, void* optArgument)
+{
+    if (g_RTV)
+    {
+        g_Context->OMSetRenderTargets(0, nullptr, nullptr);
+        g_RTV->Release();
+        g_RTV = nullptr;
+    }
+    return YYTK_OK;
+}
+
 YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 {
     YYTKPresentEvent* pPresentEvent = (YYTKPresentEvent*)pEvent;
@@ -122,15 +146,6 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui_ImplWin32_Init(g_hWnd);
             ImGui_ImplDX11_Init(g_Device, g_Context);
 
-            ID3D11Texture2D* pBackBuffer = nullptr;
-            pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
-
-            if (pBackBuffer)
-            {
-                g_Device->CreateRenderTargetView(pBackBuffer, NULL, &g_RTV);
-                pBackBuffer->Release();
-            }
-
             g_ImGuiInitialized = true;
             Misc::Print("Initialized imgui!");
                 
@@ -150,7 +165,12 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
     fpsOffset = (fpsOffset + 1) % FPSBUFSIZE;
 
 
-    if (g_ImGuiInitialized)
+    if (g_ImGuiInitialized && !g_RTV)
+    {
+        CreateRenderTarget(pSwapChain);
+    }
+
+    if (g_ImGuiInitialized && g_RTV)
     {
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -910,6 +930,7 @@ DllExport YYTKStatus PluginEntry(
     if (PmGetPluginAttributes(gThisPlugin, pluginAttributes) == YYTK_OK)
     {
         PmCreateCallback(pluginAttributes, frameCallbackAttr, FrameCallback, static_cast<EventType>(EVT_PRESENT), nullptr);
+        PmCreateCallback(pluginAttributes, resizeCallbackAttr, ResizeBuffersCallback, static_cast<EventType>(EVT_RESIZEBUFFERS), nullptr);
     }
     return YYTK_OK; // Successful PluginEntry.
 }
