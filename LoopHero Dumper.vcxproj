@@ -181,7 +181,6 @@
     <ClInclude Include="LHObjects.h" />
     <ClInclude Include="LHSprites.h" />
     <ClInclude Include="MyPlugin.h" />
-    <ClInclude Include="VariableNames.h" />
     <ClInclude Include="SDK\Enums\Enums.hpp" />
     <ClInclude Include="SDK\FwdDecls\FwdDecls.hpp" />
     <ClInclude Include="SDK\Plugins\API Definitions\APIDefs.hpp" />

@@ -17,7 +17,6 @@
 #include <deque>
 #include <algorithm>
 
-#include "VariableNames.h"
 #include "Helpers.h"
 #include "HttpRequests.h"
 
@@ -115,6 +114,33 @@ YYTKStatus ResizeBuffersCallback(YYTKEventBase* pEvent, void* optArgument)
         g_RTV = nullptr;
     }
     return YYTK_OK;
+}
+
+void DrawVarInfo(const VarInfo& var)
+{
+    bool unknown = var.value == "<unknown>";
+    if (unknown && g_filterShowParsedOnly)
+        return;
+
+    if (var.children.empty())
+    {
+        ImVec4 col = unknown ? ImVec4(255, 0, 0, 255) : ImVec4(255, 255, 255, 255);
+        ImGui::TextColored(col, "%s (%s): %s", var.name.c_str(), var.type.c_str(), var.value.c_str());
+        return;
+    }
+
+    if (ImGui::TreeNode(var.name.c_str(), "%s (%s): %s", var.name.c_str(), var.type.c_str(), var.value.c_str()))
+    {
+        for (const auto& child : var.children)
+        {
+            DrawVarInfo(child);
+        }
+        if (var.length > (int)var.children.size())
+        {
+            ImGui::TextDisabled("... %d more", var.length - (int)var.children.size());
+        }
+        ImGui::TreePop();
+    }
 }
 
 YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
@@ -378,7 +404,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 
                         if (!info.variables) // refetch if none
                         {
-                            info.variables = FetchInstanceVariablesSafe(it->first, exists);
+                            info.variables = FetchInstanceVariables(it->first, exists);
                         }
                        
                         // If instance doesnt exist anymore, continue
@@ -419,7 +445,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 
                         if (!info.variables) // refetch if none
                         {
-                            info.variables = FetchInstanceVariablesSafe(it->first, exists);
+                            info.variables = FetchInstanceVariables(it->first, exists);
                         }
 
                         // If instance doesnt exist anymore, continue
@@ -462,7 +488,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                     if (ImGui::Button(("Refresh##" + std::to_string(instance_info.second.instanceid)).c_str()))
                     {
                         Misc::Print(std::format("Getting vars for instance {}", instance_info.second.instanceid));
-                        instance_info.second.variables = FetchInstanceVariablesSafe(instance_info.first, exists);
+                        instance_info.second.variables = FetchInstanceVariables(instance_info.first, exists);
                     }
                     if (exists)
                     {
@@ -470,22 +496,12 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                         {
                             if (auto& vars = instance_info.second.variables)
                             {
+                                ImGui::PushID(instance_info.first);
                                 for (const auto& var : *vars)
                                 {
-                                    if (var.value != "<unknown>" || !g_filterShowParsedOnly)
-                                    {
-                                        ImVec4 col = ImVec4(255, 255, 255, 255);//white default
-                                        if (var.type != "number" && var.type != "string" && var.type != "bool")
-                                        {
-                                            col = ImVec4(255, 0, 0, 255); // red on unparsable
-                                        }
-
-                                        ImGui::TextColored(col, "%s (%s): %s",
-                                            var.name.c_str(),
-                                            var.type.c_str(),
-                                            var.value.c_str());
-                                    }
+                                    DrawVarInfo(var);
                                 }
+                                ImGui::PopID();
                             }
                             else
                             {
@@ -499,7 +515,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                     }
                     else
                     {
-                        ImGui::TextColored({ 255,0,0,255 }, "Not indexed!");
+                        ImGui::TextColored({ 255,0,0,255 }, "Does not exist anymore");
                     }
                     
                 }
@@ -517,7 +533,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             {
                 g_GlobalVarInfo.clear();
                 bool _;
-                g_GlobalVarInfo = FetchInstanceVariablesSafe(INSTANCE_GLOBAL, _);
+                g_GlobalVarInfo = FetchInstanceVariables(INSTANCE_GLOBAL, _);
             }
             if (ImGui::CollapsingHeader("Filters"))
             {
@@ -561,19 +577,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
           
             for (const auto& var : g_GlobalVarInfo)
             {
-                if (var.value == "<unset>")
-                {
-                    ImGui::TextColored({ 255.0, 0., 0., 255.0 }, std::format("{} ({}): {}", var.name, var.type, var.value).c_str());
-                }
-                else if (var.value != "<unknown>" || !g_filterShowParsedOnly)
-                {
-
-                    ImGui::Text("%s (%s): %s",
-                        var.name.c_str(),
-                        var.type.c_str(),
-                        var.value.c_str());
-                }
-
+                DrawVarInfo(var);
             }
             
             ImGui::EndChild();
@@ -674,24 +678,22 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             ImGui::Text("InstanceID: %d", (int)instid);
 			ImGui::Separator();
 			// Display all variables of the nearest instance
-			bool exists = true;
-            std::vector<VarInfo> vars = FetchInstanceVariablesSafe(instid, exists);
+			// Reading whole arrays every frame is too slow, so only refresh periodically
+			static double cachedInstId = 0;
+			static int framesSinceFetch = 0;
+			static bool exists = false;
+			static std::vector<VarInfo> vars;
+			if (instid != cachedInstId || ++framesSinceFetch >= 30)
+			{
+				vars = FetchInstanceVariables(instid, exists);
+				cachedInstId = instid;
+				framesSinceFetch = 0;
+			}
             if (exists)
             {
                 for (const auto& var : vars)
                 {
-                    if (var.value != "<unknown>" || !g_filterShowParsedOnly)
-                    {
-                        ImVec4 col = ImVec4(255, 255, 255, 255);//white default
-                        if (var.type != "number" && var.type != "string" && var.type != "bool")
-                        {
-                            col = ImVec4(255, 0, 0, 255); // red on unparsable
-                        }
-                        ImGui::TextColored(col, "%s (%s): %s",
-                            var.name.c_str(),
-                            var.type.c_str(),
-                            var.value.c_str());
-                    }
+                    DrawVarInfo(var);
                 }
             }
             ImGui::End();

@@ -155,9 +155,6 @@
     <ClInclude Include="LHCore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="VariableNames.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Helpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>

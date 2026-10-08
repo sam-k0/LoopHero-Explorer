@@ -158,119 +158,101 @@ void dumpSpriteIDs()
 
 }
 
-std::vector<VarInfo> FetchInstanceVariables(double inst)
+constexpr int PREVIEW_ITEMS = 16;
+constexpr int PREVIEW_DEPTH = 2;
+constexpr int MAX_ARRAY_ITEMS = 1000;
+// Arrays can contain themselves, this stops the recursion.
+constexpr int MAX_ARRAY_DEPTH = 8;
+
+std::string GetTypeName(const YYRValue& val)
 {
-    std::vector<VarInfo> result;
-
-    YYRValue varr = Binds::CallBuiltinA("variable_instance_get_names", { inst });
-    Misc::Print(varr.As<int>());
-    YYRValue len = Binds::CallBuiltinA("array_length_1d", { varr });
-
-    int count = len.As<int>();
-
-    for (int i = 0; i < count; i++)
-    {
-        YYRValue item, content, type;
-
-        CallBuiltin(item, "array_get", nullptr, nullptr, { varr, (double)i });
-        std::string varName = DCS(item);
-
-        CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst, varName.c_str() });
-        CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-
-        std::string typeStr = DCS(type);
-        std::string valueStr;
-
-        if (typeStr == "number")
-            valueStr = std::to_string(double(content));
-        else if (typeStr == "bool")
-            valueStr = bool(content) ? "true" : "false";
-        else if (typeStr == "string")
-            valueStr = DCS(content);
-        else
-            valueStr = "<unknown>";
-
-        result.push_back({ varName, typeStr, valueStr });
-    }
-
-    return result; // fully safe snapshot
+    return DCS(Binds::CallBuiltinA("typeof", { val }));
 }
 
-// exists will be false if not yet saved
-std::vector<VarInfo> FetchInstanceVariablesSafe(double inst, bool& exists)
+std::string FormatScalar(const YYRValue& val, const std::string& typeStr)
 {
-    std::vector<VarInfo> result;
-    int oid = INSTANCE_GLOBAL; // global inst doesnt have object index, so use as default
-    // Try to find inst in map
-    if (inst != INSTANCE_GLOBAL)
+    if (typeStr == "number" || typeStr == "int32" || typeStr == "int64")
+        return std::to_string(double(val));
+    if (typeStr == "bool")
+        return bool(val) ? "true" : "false";
+    if (typeStr == "string")
+        return DCS(val);
+    if (typeStr == "undefined")
+        return "undefined";
+    return "<unknown>";
+}
+
+std::string ArrayPreview(const VarInfo& arr, int depth = 0)
+{
+    if (depth >= PREVIEW_DEPTH || (arr.children.empty() && arr.length > 0))
+        return std::format("[{} items]", arr.length);
+
+    std::string out = "[";
+    for (int i = 0; i < (int)arr.children.size() && i < PREVIEW_ITEMS; i++)
     {
-        oid = Binds::CallBuiltinA("variable_instance_get", { inst, "object_index" });
-
-        if (!g_ObjectVarNames.contains((int)oid))
-        {
-            Misc::Print(std::format("Instance id {} ({}) not found in map!", inst, oid), CLR_RED);
-            exists = false;
-            return result;
-        }
-    }
-
-    exists = true;
-    for (const auto& it : g_ObjectVarNames.at((int)oid))
-    {
-        YYRValue item, content, type, isset;
-
-        // Check if the variable exists already (may be inited later, would be violation)
-        if (inst != INSTANCE_GLOBAL)
-        {
-            CallBuiltin(isset, "variable_instance_exists", nullptr, nullptr, { inst, it });
-        }
-        else // use this for globals, other doesnt work for some reason
-        {
-            CallBuiltin(isset, "variable_global_exists", nullptr, nullptr, { it });
-        }
-
-        if (bool(isset)) // exists
-        {
-            CallBuiltin(content, "variable_instance_get", nullptr, nullptr, { inst,it });
-            CallBuiltin(type, "typeof", nullptr, nullptr, { content });
-
-            std::string typeStr = DCS(type);
-            std::string valueStr;
-
-            if (typeStr == "number")
-                valueStr = std::to_string(double(content));
-            else if (typeStr == "bool")
-                valueStr = bool(content) ? "true" : "false";
-            else if (typeStr == "string")
-                valueStr = DCS(content);
-            else
-                valueStr = "<unknown>";
-
-            result.push_back({ it, typeStr, valueStr });
-        }
+        const VarInfo& item = arr.children[i];
+        if (i > 0)
+            out += ", ";
+        if (item.type == "array")
+            out += ArrayPreview(item, depth + 1);
+        else if (item.type == "string")
+            out += "\"" + item.value + "\"";
         else
+            out += item.value;
+    }
+    if (arr.length > PREVIEW_ITEMS)
+        out += std::format(", ... +{}", arr.length - PREVIEW_ITEMS);
+    return out + "]";
+}
+
+VarInfo ReadValue(const std::string& name, const YYRValue& val, int depth = 0)
+{
+    VarInfo info{ name, GetTypeName(val) };
+    if (info.type != "array")
+    {
+        info.value = FormatScalar(val, info.type);
+        return info;
+    }
+
+    info.length = (int)Binds::CallBuiltinA("array_length_1d", { val });
+    if (depth < MAX_ARRAY_DEPTH)
+    {
+        for (int i = 0; i < info.length && i < MAX_ARRAY_ITEMS; i++)
         {
-            result.push_back({ it, "<?type>", "<unset>" });
+            YYRValue item = Binds::CallBuiltinA("array_get", { val, (double)i });
+            info.children.push_back(ReadValue(std::format("[{}]", i), item, depth + 1));
         }
     }
-    return result;
+    info.value = ArrayPreview(info);
+    return info;
 }
 
 std::string YYRValueToString(const YYRValue& val)
 {
-    YYRValue type;
-    CallBuiltin(type, "typeof", nullptr, nullptr, { val });
-    std::string typeStr = DCS(type);
-    if (typeStr == "number")
-        return std::to_string(double(val));
-    else if (typeStr == "bool")
-        return bool(val) ? "true" : "false";
-    else if (typeStr == "string")
-        return DCS(val);
-    else if (typeStr == "array")
-		return "<array>";
-    else
-        return "<unknown>";
+    return ReadValue("", val).value;
+}
+
+// exists is false if the instance is gone
+std::vector<VarInfo> FetchInstanceVariables(double inst, bool& exists)
+{
+    std::vector<VarInfo> result;
+
+    exists = inst == INSTANCE_GLOBAL || bool(Binds::CallBuiltinA("instance_exists", { inst }));
+    if (!exists)
+        return result;
+
+    YYRValue names;
+    Binds::GetInstanceVariables(names, inst);
+    int count = (int)Binds::CallBuiltinA("array_length_1d", { names });
+
+    for (int i = 0; i < count; i++)
+    {
+        std::string varName = DCS(Binds::CallBuiltinA("array_get", { names, (double)i }));
+        YYRValue content = Binds::CallBuiltinA("variable_instance_get", { inst, varName });
+        result.push_back(ReadValue(varName, content));
+    }
+
+    return result;
 }
 
 void FetchInstanceVarsDumpFile(double index, bool isobject, bool dumpparsable, const char* filename)

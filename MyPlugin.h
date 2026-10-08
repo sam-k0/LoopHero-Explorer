@@ -45,6 +45,8 @@ struct VarInfo {
     std::string name;
     std::string type;
     std::string value;
+    int length = 0; // arrays only, can be more than children.size()
+    std::vector<VarInfo> children;
 };
 
 // same for a whole instance
