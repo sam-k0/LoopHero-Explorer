@@ -65,6 +65,8 @@ char g_instanceVarNameFilter[256] = "";
 char g_instanceVarValueFilter[256] = "";
 // Event filter
 char g_eventLogFilter[256] = "";
+// Variable edit popup
+char g_editValueBuffer[256] = "";
 // Fps measurement
 LARGE_INTEGER freq, last;
 float fpsHistory[FPSBUFSIZE] = {};
@@ -116,7 +118,33 @@ YYTKStatus ResizeBuffersCallback(YYTKEventBase* pEvent, void* optArgument)
     return YYTK_OK;
 }
 
-void DrawVarInfo(const VarInfo& var)
+void DrawEditButton(VarInfo& var, double inst)
+{
+    ImGui::PushID(var.name.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Edit"))
+    {
+        strncpy(g_editValueBuffer, var.value.c_str(), sizeof(g_editValueBuffer));
+        g_editValueBuffer[sizeof(g_editValueBuffer) - 1] = '\0'; // safety
+        ImGui::OpenPopup("edit");
+    }
+    if (ImGui::BeginPopup("edit"))
+    {
+        ImGui::Text("%s (%s)", var.name.c_str(), var.type.c_str());
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        bool apply = ImGui::InputText("##value", g_editValueBuffer, sizeof(g_editValueBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        apply |= ImGui::Button("Set");
+        if (apply && SetVariable(inst, var, g_editValueBuffer))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+}
+
+// inst is only passed for top level variables, array items can't be edited
+void DrawVarInfo(VarInfo& var, std::optional<double> inst = std::nullopt)
 {
     bool unknown = var.value == "<unknown>";
     if (unknown && g_filterShowParsedOnly)
@@ -126,12 +154,14 @@ void DrawVarInfo(const VarInfo& var)
     {
         ImVec4 col = unknown ? ImVec4(255, 0, 0, 255) : ImVec4(255, 255, 255, 255);
         ImGui::TextColored(col, "%s (%s): %s", var.name.c_str(), var.type.c_str(), var.value.c_str());
+        if (inst && IsEditableType(var.type))
+            DrawEditButton(var, *inst);
         return;
     }
 
     if (ImGui::TreeNode(var.name.c_str(), "%s (%s): %s", var.name.c_str(), var.type.c_str(), var.value.c_str()))
     {
-        for (const auto& child : var.children)
+        for (auto& child : var.children)
         {
             DrawVarInfo(child);
         }
@@ -497,9 +527,9 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
                             if (auto& vars = instance_info.second.variables)
                             {
                                 ImGui::PushID(instance_info.first);
-                                for (const auto& var : *vars)
+                                for (auto& var : *vars)
                                 {
-                                    DrawVarInfo(var);
+                                    DrawVarInfo(var, instance_info.first);
                                 }
                                 ImGui::PopID();
                             }
@@ -575,9 +605,9 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
             //Variable display
             ImGui::BeginChild("scroll_region", ImVec2(0, 0), true);
           
-            for (const auto& var : g_GlobalVarInfo)
+            for (auto& var : g_GlobalVarInfo)
             {
-                DrawVarInfo(var);
+                DrawVarInfo(var, INSTANCE_GLOBAL);
             }
             
             ImGui::EndChild();
@@ -691,7 +721,7 @@ YYTKStatus FrameCallback(YYTKEventBase* pEvent, void* optArgument)
 			}
             if (exists)
             {
-                for (const auto& var : vars)
+                for (auto& var : vars)
                 {
                     DrawVarInfo(var);
                 }

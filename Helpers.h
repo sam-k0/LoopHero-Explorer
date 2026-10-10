@@ -3,6 +3,7 @@
 #include <vector>
 #include <regex>
 #include <sstream>
+#include <charconv>
 #include "SDK/SDK.hpp"
 
 namespace Binds {
@@ -253,6 +254,63 @@ std::vector<VarInfo> FetchInstanceVariables(double inst, bool& exists)
     }
 
     return result;
+}
+
+// Only plain values can be edited, arrays and unknown types are skipped
+bool IsEditableType(const std::string& typeStr)
+{
+    return typeStr == "number" || typeStr == "int32" || typeStr == "int64" || typeStr == "bool" || typeStr == "string";
+}
+
+// Parses input according to var.type and writes it to the game, then reads it back into var
+bool SetVariable(double inst, VarInfo& var, const std::string& input)
+{
+    bool global = inst == INSTANCE_GLOBAL;
+    if (!global && !bool(Binds::CallBuiltinA("instance_exists", { inst })))
+    {
+        Misc::Print(std::format("Instance {} does not exist anymore", inst));
+        return false;
+    }
+
+    YYRValue value;
+    if (var.type == "string")
+    {
+        value = input;
+    }
+    else if (var.type == "bool")
+    {
+        if (input != "true" && input != "false" && input != "1" && input != "0")
+        {
+            Misc::Print("Not a bool: " + input);
+            return false;
+        }
+        value = input == "true" || input == "1";
+    }
+    else
+    {
+        double num;
+        auto [end, ec] = std::from_chars(input.data(), input.data() + input.size(), num);
+        if (ec != std::errc() || end != input.data() + input.size())
+        {
+            Misc::Print("Not a number: " + input);
+            return false;
+        }
+        value = num;
+    }
+
+    YYRValue stored;
+    if (global)
+    {
+        Binds::CallBuiltinA("variable_global_set", { var.name, value });
+        stored = Binds::CallBuiltinA("variable_global_get", { var.name });
+    }
+    else
+    {
+        Binds::CallBuiltinA("variable_instance_set", { inst, var.name, value });
+        stored = Binds::CallBuiltinA("variable_instance_get", { inst, var.name });
+    }
+    var = ReadValue(var.name, stored);
+    return true;
 }
 
 void FetchInstanceVarsDumpFile(double index, bool isobject, bool dumpparsable, const char* filename)
