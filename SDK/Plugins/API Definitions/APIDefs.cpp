@@ -1,7 +1,7 @@
 #include "APIDefs.hpp"
 #include <TlHelp32.h>
 
-HMODULE GetYYTKModule()
+HMODULE FindYYTKModule()
 {
 	HANDLE ModuleSnapshot = INVALID_HANDLE_VALUE;
 
@@ -26,6 +26,15 @@ HMODULE GetYYTKModule()
 
 	CloseHandle(ModuleSnapshot);
 	return nullptr;
+}
+
+// Every API call goes through here, the module snapshot is way too slow to take per call (e.g. builtins in draw events).
+HMODULE GetYYTKModule()
+{
+	static HMODULE YYTKModule = nullptr;
+	if (!YYTKModule)
+		YYTKModule = FindYYTKModule();
+	return YYTKModule;
 }
 
 bool GetFunctionByName(const std::string& Name, TRoutine& outRoutine)
