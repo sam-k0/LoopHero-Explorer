@@ -18,7 +18,7 @@
 
 
 HINSTANCE DllHandle; // Self modhandle
-std::string gPluginName = "sam-k0.LHExplorer.yytk";
+std::string gPluginName = "sam-k0.loophero.explorer";
 YYTKPlugin* gThisPlugin = nullptr;
 
 std::map<int, std::string> g_createEvents; // instance id to event
