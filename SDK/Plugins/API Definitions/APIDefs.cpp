@@ -5,24 +5,30 @@ HMODULE FindYYTKModule()
 {
 	HANDLE ModuleSnapshot = INVALID_HANDLE_VALUE;
 
-	MODULEENTRY32 ModuleEntry;
-	ModuleEntry.dwSize = sizeof(MODULEENTRY32);
+	// The snapshot fails with ERROR_BAD_LENGTH while another thread is loading or unloading a DLL, so retry until it succeeds
+	do
+	{
+		ModuleSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+	} while (ModuleSnapshot == INVALID_HANDLE_VALUE && GetLastError() == ERROR_BAD_LENGTH);
 
-	ModuleSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
 	if (ModuleSnapshot == INVALID_HANDLE_VALUE)
 		return nullptr;
 
-	Module32First(ModuleSnapshot, &ModuleEntry);
+	MODULEENTRY32 ModuleEntry;
+	ModuleEntry.dwSize = sizeof(MODULEENTRY32);
 
-	do
+	if (Module32First(ModuleSnapshot, &ModuleEntry))
 	{
-		if (GetProcAddress(ModuleEntry.hModule, "GetSDKVersion"))
+		do
 		{
-			CloseHandle(ModuleSnapshot);
-			return ModuleEntry.hModule;
-		}
+			if (GetProcAddress(ModuleEntry.hModule, "GetSDKVersion"))
+			{
+				CloseHandle(ModuleSnapshot);
+				return ModuleEntry.hModule;
+			}
 
-	} while (Module32Next(ModuleSnapshot, &ModuleEntry));
+		} while (Module32Next(ModuleSnapshot, &ModuleEntry));
+	}
 
 	CloseHandle(ModuleSnapshot);
 	return nullptr;
